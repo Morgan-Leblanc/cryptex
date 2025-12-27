@@ -18,7 +18,7 @@ interface GameState {
   // Actions
   setView: (view: AppView) => void;
   validateCode: (code: string) => boolean;
-  login: (username: string) => Promise<{ error: string; message: string } | void>;
+  login: (username: string, avatar?: string) => Promise<{ error: string; message: string } | void>;
   logout: () => Promise<void>;
   startGame: () => void;
   completeRound: (roundIndex: number, score: number) => void;
@@ -50,7 +50,7 @@ export const useGameStore = create<GameState>()(
         return false;
       },
 
-      login: async (username) => {
+      login: async (username, avatar) => {
         const isAdmin = username.toLowerCase() === ADMIN_USERNAME.toLowerCase();
         const userId = `user_${username.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
         
@@ -61,6 +61,7 @@ export const useGameStore = create<GameState>()(
           currentRound: 0,
           completedRounds: [],
           totalScore: 0,
+          avatar: avatar || undefined,
         };
 
         // Call API to join game
@@ -69,7 +70,7 @@ export const useGameStore = create<GameState>()(
             const response = await fetch(`${API_BASE}?action=join`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ username }),
+              body: JSON.stringify({ username, avatar }),
             });
             
             if (!response.ok) {

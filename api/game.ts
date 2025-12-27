@@ -26,6 +26,7 @@ interface Player {
   finishedAt: string | null;
   roundStartTime: number | null;
   hasFoundCurrentRound: boolean;
+  avatar?: string;
 }
 
 interface GameState {
@@ -100,7 +101,7 @@ let players: Record<string, Player> = {};
 // ============================================
 // HELPERS
 // ============================================
-function createPlayer(username: string): Player {
+function createPlayer(username: string, avatar?: string): Player {
   return {
     username,
     joinedAt: new Date().toISOString(),
@@ -111,6 +112,7 @@ function createPlayer(username: string): Player {
     finishedAt: null,
     roundStartTime: null,
     hasFoundCurrentRound: false,
+    avatar,
   };
 }
 
@@ -121,6 +123,7 @@ function getPlayersForAPI() {
     isFinished: p.isFinished,
     roundsCompleted: p.roundsCompleted.filter(Boolean).length,
     hasFoundCurrentRound: p.hasFoundCurrentRound,
+    avatar: p.avatar,
   }));
 }
 
@@ -142,6 +145,7 @@ function getLeaderboard() {
       isFinished: p.isFinished,
       totalTime: p.roundTimes.reduce((sum, t) => sum + t, 0),
       hasFoundCurrentRound: p.hasFoundCurrentRound,
+      avatar: p.avatar,
     }));
 }
 
@@ -400,7 +404,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
 
       // Rejoindre
       case 'join': {
-        const { username } = body;
+        const { username, avatar } = body;
         if (!username) {
           return res.status(400).json({ error: 'Username required' });
         }
@@ -414,7 +418,10 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         }
         
         if (!players[username]) {
-          players[username] = createPlayer(username);
+          players[username] = createPlayer(username, avatar);
+        } else if (avatar) {
+          // Update avatar if player already exists
+          players[username].avatar = avatar;
         }
         
         return res.status(200).json({ 

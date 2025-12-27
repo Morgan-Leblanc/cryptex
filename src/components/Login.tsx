@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowRight, Loader2, Compass, Map, ScrollText, AlertTriangle } from 'lucide-react';
+import { ArrowRight, Loader2, Compass, Map, ScrollText, AlertTriangle, Camera, User } from 'lucide-react';
 import { useGameStore } from '../stores/gameStore';
+import { GiphyPicker } from './GiphyPicker';
 
 export function Login() {
   const [username, setUsername] = useState('');
+  const [avatar, setAvatar] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showGiphyPicker, setShowGiphyPicker] = useState(false);
   const login = useGameStore((s) => s.login);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -16,7 +19,7 @@ export function Login() {
       setIsLoading(true);
       setError(null);
       try {
-        const result = await login(username.trim());
+        const result = await login(username.trim(), avatar);
         if (result && 'error' in result) {
           setError(result.message || 'Impossible de rejoindre la partie');
         }
@@ -123,6 +126,40 @@ export function Login() {
           className="card-parchment p-6 sm:p-8"
         >
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Avatar Picker */}
+            <div className="flex flex-col items-center">
+              <label className="block text-amber-400/80 text-sm font-display uppercase tracking-wider mb-3 text-center">
+                Votre Avatar
+              </label>
+              <motion.button
+                type="button"
+                onClick={() => setShowGiphyPicker(true)}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="relative w-20 h-20 rounded-full overflow-hidden border-3 border-amber-600 hover:border-amber-400 transition-all group"
+                style={{
+                  background: avatar ? 'transparent' : 'linear-gradient(135deg, #3d1f08 0%, #1a0f04 100%)',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.5), inset 0 0 20px rgba(212, 175, 55, 0.1)',
+                }}
+              >
+                {avatar ? (
+                  <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <User className="w-8 h-8 text-amber-700" />
+                  </div>
+                )}
+                
+                {/* Hover overlay */}
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Camera className="w-6 h-6 text-amber-400" />
+                </div>
+              </motion.button>
+              <p className="text-xs text-amber-600/70 mt-2">
+                Cliquez pour choisir un GIF
+              </p>
+            </div>
+
             <div className="relative">
               <label className="block text-amber-400/80 text-sm font-display uppercase tracking-wider mb-2">
                 Nom de l'Aventurier
@@ -222,6 +259,14 @@ export function Login() {
           </div>
         </motion.div>
       </motion.div>
+
+      {/* Giphy Picker Modal */}
+      <GiphyPicker
+        isOpen={showGiphyPicker}
+        onClose={() => setShowGiphyPicker(false)}
+        onSelect={setAvatar}
+        currentAvatar={avatar}
+      />
     </div>
   );
 }

@@ -39,10 +39,15 @@ function AnimatedTorch({ side }: { side: 'left' | 'right' }) {
   );
 }
 
+interface PlayerInfo {
+  username: string;
+  avatar?: string;
+}
+
 export function WaitingRoom() {
   const { user, logout, setWaitingForStart } = useGameStore();
   const [dots, setDots] = useState('');
-  const [connectedPlayers, setConnectedPlayers] = useState<string[]>([]);
+  const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Animate dots
@@ -56,10 +61,18 @@ export function WaitingRoom() {
   // Poll for game state
   const fetchGameState = useCallback(async () => {
     try {
-      const response = await fetch(API_BASE);
+      const response = await fetch(`${API_BASE}?admin=true`);
       if (response.ok) {
         const data = await response.json();
-        setConnectedPlayers(data.connectedPlayers || []);
+        // Extract player info with avatars
+        if (data.players) {
+          setPlayers(data.players.map((p: { username: string; avatar?: string }) => ({
+            username: p.username,
+            avatar: p.avatar,
+          })));
+        } else if (data.connectedPlayers) {
+          setPlayers(data.connectedPlayers.map((name: string) => ({ username: name })));
+        }
         
         if (data.isStarted) {
           setWaitingForStart(false);
@@ -181,16 +194,25 @@ export function WaitingRoom() {
         >
           {/* Current user */}
           <div className="flex items-center justify-center gap-3 mb-4 pb-4 border-b border-amber-900/30">
-            <div 
-              className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-display font-bold"
-              style={{
-                background: 'linear-gradient(135deg, #d4af37 0%, #8b6914 100%)',
-                boxShadow: '0 4px 15px rgba(212, 175, 55, 0.3)',
-                color: '#1a1612',
-              }}
-            >
-              {user.username.charAt(0).toUpperCase()}
-            </div>
+            {user.avatar ? (
+              <img 
+                src={user.avatar} 
+                alt={user.username}
+                className="w-12 h-12 rounded-full object-cover border-2 border-amber-500"
+                style={{ boxShadow: '0 4px 15px rgba(212, 175, 55, 0.3)' }}
+              />
+            ) : (
+              <div 
+                className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-display font-bold"
+                style={{
+                  background: 'linear-gradient(135deg, #d4af37 0%, #8b6914 100%)',
+                  boxShadow: '0 4px 15px rgba(212, 175, 55, 0.3)',
+                  color: '#1a1612',
+                }}
+              >
+                {user.username.charAt(0).toUpperCase()}
+              </div>
+            )}
             <div className="text-left">
               <p className="text-amber-100 font-display font-semibold">{user.username}</p>
               <p className="text-xs text-amber-600">Explorateur</p>
@@ -200,25 +222,36 @@ export function WaitingRoom() {
           {/* Connected players */}
           <div className="flex items-center justify-center gap-2 text-amber-500 text-sm mb-4">
             <Users className="w-4 h-4" />
-            <span className="font-display">{connectedPlayers.length} aventurier{connectedPlayers.length > 1 ? 's' : ''} dans le temple</span>
+            <span className="font-display">{players.length} aventurier{players.length > 1 ? 's' : ''} dans le temple</span>
           </div>
 
-          {connectedPlayers.length > 0 && (
+          {players.length > 0 && (
             <div className="flex flex-wrap justify-center gap-2">
-              {connectedPlayers.map((player, index) => (
+              {players.map((player, index) => (
                 <motion.div
-                  key={player}
+                  key={player.username}
                   initial={{ opacity: 0, scale: 0 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: index * 0.1 }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-body ${
-                    player === user.username
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-body ${
+                    player.username === user.username
                       ? 'bg-amber-900/50 text-amber-200 border border-amber-600'
                       : 'bg-stone-800/80 text-stone-400 border border-stone-700'
                   }`}
                 >
-                  {player}
-                  {player === user.username && ' ★'}
+                  {player.avatar ? (
+                    <img 
+                      src={player.avatar} 
+                      alt={player.username}
+                      className="w-5 h-5 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-stone-700 flex items-center justify-center text-[10px] font-bold text-amber-400">
+                      {player.username.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  {player.username}
+                  {player.username === user.username && ' ★'}
                 </motion.div>
               ))}
             </div>

@@ -38,6 +38,7 @@ interface PlayerProgress {
   isFinished: boolean;
   totalTime: number;
   hasFoundCurrentRound?: boolean;
+  avatar?: string;
 }
 
 interface RoundWinner {
@@ -704,6 +705,17 @@ export function AdminPanel() {
                       }`}>
                         #{index + 1}
                       </span>
+                      {player.avatar ? (
+                        <img 
+                          src={player.avatar} 
+                          alt={player.username}
+                          className="w-8 h-8 rounded-full object-cover border border-amber-600"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-stone-700 flex items-center justify-center text-amber-400 text-sm font-bold">
+                          {player.username.charAt(0).toUpperCase()}
+                        </div>
+                      )}
                       <span className="text-amber-100">{player.username}</span>
                       {player.isFinished && (
                         <span className="text-xs px-2 py-0.5 rounded-full bg-green-700 text-green-100">

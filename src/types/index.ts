@@ -5,6 +5,7 @@ export interface User {
   currentRound: number;
   completedRounds: number[];
   totalScore: number;
+  avatar?: string; // URL du GIF Giphy
 }
 
 export interface GameSession {
