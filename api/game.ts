@@ -39,6 +39,7 @@ interface GameState {
   roundActive: boolean;
   roundWinners: string[];
   revealedHints: number[];
+  resetAt: string | null; // Timestamp du dernier reset pour forcer la déconnexion des joueurs
 }
 
 // ============================================
@@ -91,6 +92,7 @@ let gameState: GameState = {
   roundActive: false,
   roundWinners: [],
   revealedHints: [0, 0, 0, 0, 0, 0],
+  resetAt: null,
 };
 
 let players: Record<string, Player> = {};
@@ -214,6 +216,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       roundActive: gameState.roundActive,
       connectedPlayers: Object.keys(players),
       playerCount: Object.keys(players).length,
+      resetAt: gameState.resetAt,
     };
 
     if (admin === 'true') {
@@ -377,20 +380,22 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
 
       // Reset
       case 'reset': {
+        const resetTimestamp = new Date().toISOString();
         gameState = {
           id: `game_${Date.now()}`,
           rounds: JSON.parse(JSON.stringify(DEFAULT_ROUNDS)),
           isStarted: false,
           startedAt: null,
-          createdAt: new Date().toISOString(),
+          createdAt: resetTimestamp,
           gameMode: gameState.gameMode,
           currentRound: 0,
           roundActive: false,
           roundWinners: [],
           revealedHints: [0, 0, 0, 0, 0, 0],
+          resetAt: resetTimestamp,
         };
         players = {};
-        return res.status(200).json({ success: true, game: gameState });
+        return res.status(200).json({ success: true, game: gameState, resetAt: resetTimestamp });
       }
 
       // Rejoindre

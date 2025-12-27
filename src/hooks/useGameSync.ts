@@ -10,10 +10,13 @@ export function useGameSync() {
     user, 
     isAdmin, 
     setWaitingForStart,
-    isWaitingForStart 
+    isWaitingForStart,
+    logout,
+    session
   } = useGameStore();
   
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastKnownResetRef = useRef<string | null>(null);
 
   const syncWithServer = useCallback(async () => {
     if (!isAuthenticated || !user) return;
@@ -22,6 +25,19 @@ export function useGameSync() {
       const response = await fetch(API_BASE);
       if (response.ok) {
         const data = await response.json();
+        
+        // Check if game was reset - force logout for all players
+        if (!isAdmin && data.resetAt) {
+          // Initialize lastKnownReset on first sync
+          if (lastKnownResetRef.current === null) {
+            lastKnownResetRef.current = data.resetAt;
+          } else if (data.resetAt !== lastKnownResetRef.current) {
+            // Reset happened! Force logout
+            console.log('Game was reset by admin, logging out...');
+            await logout();
+            return;
+          }
+        }
         
         // For non-admin users, check if game is started
         if (!isAdmin) {
@@ -37,7 +53,7 @@ export function useGameSync() {
     } catch (error) {
       console.error('Failed to sync with server:', error);
     }
-  }, [isAuthenticated, user, isAdmin, setWaitingForStart]);
+  }, [isAuthenticated, user, isAdmin, setWaitingForStart, logout]);
 
   // Initial sync on mount
   useEffect(() => {
@@ -46,9 +62,16 @@ export function useGameSync() {
     }
   }, [isAuthenticated, user, isAdmin, syncWithServer]);
 
-  // Polling only when waiting for game to start
+  // Reset the lastKnownReset when user logs out
   useEffect(() => {
-    if (isAuthenticated && user && !isAdmin && isWaitingForStart) {
+    if (!session) {
+      lastKnownResetRef.current = null;
+    }
+  }, [session]);
+
+  // Polling for all connected players (not just waiting)
+  useEffect(() => {
+    if (isAuthenticated && user && !isAdmin) {
       intervalRef.current = setInterval(syncWithServer, POLL_INTERVAL);
     }
 
@@ -58,7 +81,7 @@ export function useGameSync() {
         intervalRef.current = null;
       }
     };
-  }, [isAuthenticated, user, isAdmin, isWaitingForStart, syncWithServer]);
+  }, [isAuthenticated, user, isAdmin, syncWithServer]);
 
   return { syncWithServer };
 }
