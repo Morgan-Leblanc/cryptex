@@ -23,7 +23,7 @@ export function CryptexWheel({
   const velocityRef = useRef(0);
   const lastYRef = useRef(0);
   const lastTimeRef = useRef(0);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number | undefined>(undefined);
   const accumulatorRef = useRef(0);
   
   const [isDragging, setIsDragging] = useState(false);

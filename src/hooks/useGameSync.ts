@@ -1,6 +1,5 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useGameStore } from '../stores/gameStore';
-import { useAdminStore } from '../stores/adminStore';
 
 const API_BASE = '/api/game';
 const POLL_INTERVAL = 2000;
@@ -14,7 +13,6 @@ export function useGameSync() {
     isWaitingForStart 
   } = useGameStore();
   
-  const { gameConfig } = useAdminStore();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const syncWithServer = useCallback(async () => {
