@@ -400,6 +400,14 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(400).json({ error: 'Username required' });
         }
         
+        // Si la partie est lancée et le joueur n'existe pas, refuser
+        if (gameState.isStarted && !players[username]) {
+          return res.status(403).json({ 
+            error: 'Game already started',
+            message: 'La partie a déjà commencé. Demandez à l\'admin de reset pour une nouvelle partie.'
+          });
+        }
+        
         if (!players[username]) {
           players[username] = createPlayer(username);
         }

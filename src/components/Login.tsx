@@ -1,20 +1,27 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowRight, Loader2, Compass, Map, ScrollText } from 'lucide-react';
+import { ArrowRight, Loader2, Compass, Map, ScrollText, AlertTriangle } from 'lucide-react';
 import { useGameStore } from '../stores/gameStore';
 
 export function Login() {
   const [username, setUsername] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const login = useGameStore((s) => s.login);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (username.trim().length >= 2 && !isLoading) {
       setIsLoading(true);
+      setError(null);
       try {
-        await login(username.trim());
+        const result = await login(username.trim());
+        if (result && 'error' in result) {
+          setError(result.message || 'Impossible de rejoindre la partie');
+        }
+      } catch {
+        setError('Erreur de connexion au serveur');
       } finally {
         setIsLoading(false);
       }
@@ -153,6 +160,21 @@ export function Login() {
                 </motion.p>
               )}
             </div>
+
+            {/* Error message */}
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 rounded-lg bg-red-900/50 border border-red-700/50 flex items-start gap-3"
+              >
+                <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-red-300 text-sm font-medium">Accès refusé</p>
+                  <p className="text-red-400/80 text-xs mt-1">{error}</p>
+                </div>
+              </motion.div>
+            )}
 
             <motion.button
               type="submit"

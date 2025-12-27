@@ -475,24 +475,34 @@ export function AdminPanel() {
               disabled={actionLoading === 'reset'}
               className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-display transition-all disabled:opacity-50 ${
                 confirmReset
-                  ? 'bg-red-900 border border-red-600 text-red-300'
-                  : 'bg-stone-800 border border-stone-700 text-stone-400 hover:text-stone-300'
+                  ? 'bg-red-900 border-2 border-red-500 text-red-200 shadow-lg shadow-red-900/50'
+                  : 'bg-gradient-to-r from-orange-900 to-red-900 border border-orange-700 text-orange-200 hover:from-orange-800 hover:to-red-800'
               }`}
             >
               {actionLoading === 'reset' ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : confirmReset ? (
                 <>
-                  <AlertCircle className="w-5 h-5" />
-                  Confirmer Reset?
+                  <AlertCircle className="w-5 h-5 animate-pulse" />
+                  Confirmer Reset Total?
                 </>
               ) : (
                 <>
                   <RotateCcw className="w-5 h-5" />
-                  Reset
+                  Reset Partie
                 </>
               )}
             </motion.button>
+          </div>
+
+          {/* Info box about single game */}
+          <div className="mt-4 p-3 bg-amber-900/20 border border-amber-700/30 rounded-lg">
+            <p className="text-xs text-amber-400 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>
+                <strong>Une seule partie active à la fois.</strong> Utilisez "Reset Partie" pour tout recommencer et permettre à de nouveaux joueurs de rejoindre.
+              </span>
+            </p>
           </div>
 
           {/* Contrôle des manches (mode contrôlé) */}

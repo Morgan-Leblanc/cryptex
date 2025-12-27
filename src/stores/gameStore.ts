@@ -18,7 +18,7 @@ interface GameState {
   // Actions
   setView: (view: AppView) => void;
   validateCode: (code: string) => boolean;
-  login: (username: string) => Promise<void>;
+  login: (username: string) => Promise<{ error: string; message: string } | void>;
   logout: () => Promise<void>;
   startGame: () => void;
   completeRound: (roundIndex: number, score: number) => void;
@@ -66,13 +66,22 @@ export const useGameStore = create<GameState>()(
         // Call API to join game
         if (!isAdmin) {
           try {
-            await fetch(`${API_BASE}?action=join`, {
+            const response = await fetch(`${API_BASE}?action=join`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ username }),
             });
+            
+            if (!response.ok) {
+              const errorData = await response.json();
+              return { 
+                error: errorData.error || 'Join failed', 
+                message: errorData.message || 'Impossible de rejoindre la partie' 
+              };
+            }
           } catch (error) {
             console.error('Failed to join game:', error);
+            return { error: 'Network error', message: 'Erreur de connexion au serveur' };
           }
         }
 
