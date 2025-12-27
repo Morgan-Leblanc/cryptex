@@ -10,7 +10,6 @@ export function useGameSync() {
     user, 
     isAdmin, 
     setWaitingForStart,
-    isWaitingForStart,
     logout,
     session
   } = useGameStore();
