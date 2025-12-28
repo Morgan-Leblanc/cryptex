@@ -50,6 +50,7 @@ export function CryptexGame() {
   const [elapsed, setElapsed] = useState(0);
   const [wheelResults, setWheelResults] = useState<(boolean | null)[]>(Array(WHEEL_COUNT).fill(null));
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   // Fetch game state from API (includes mode info) - avec protection contre les réinitialisations
   const fetchGameState = useCallback(async () => {
@@ -158,6 +159,16 @@ export function CryptexGame() {
     }, 1000);
     return () => clearInterval(timer);
   }, [startTime]);
+
+  // Si pas de session mais on a un user et accessCode, essayer de restaurer
+  useEffect(() => {
+    if (!session && user && accessCode && !isRestoring) {
+      setIsRestoring(true);
+      checkReconnect().finally(() => {
+        setIsRestoring(false);
+      });
+    }
+  }, [session, user, accessCode, checkReconnect, isRestoring]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -274,18 +285,6 @@ export function CryptexGame() {
     );
   }
 
-  // Si pas de session mais on a un user et accessCode, essayer de restaurer
-  const [isRestoring, setIsRestoring] = useState(false);
-  
-  useEffect(() => {
-    if (!session && user && accessCode && !isRestoring) {
-      setIsRestoring(true);
-      checkReconnect().finally(() => {
-        setIsRestoring(false);
-      });
-    }
-  }, [session, user, accessCode, checkReconnect, isRestoring]);
-  
   if (!session && user && accessCode) {
     // Afficher un loader pendant la restauration
     return (
