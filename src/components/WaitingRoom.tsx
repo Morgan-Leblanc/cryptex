@@ -63,9 +63,20 @@ export function WaitingRoom() {
   }, [setWaitingForStart]);
 
   useEffect(() => {
-    fetchGameState();
-    const interval = setInterval(fetchGameState, POLL_INTERVAL);
-    return () => clearInterval(interval);
+    fetchGameState(); // Fetch initial
+    
+    // Fetch quand la fenêtre redevient visible
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchGameState();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [fetchGameState]);
 
   const handleLogout = async () => {

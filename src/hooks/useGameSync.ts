@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
-const POLL_INTERVAL = 3000; // 3 secondes - simple et efficace
 
 export function useGameSync() {
   const { 
@@ -45,14 +44,40 @@ export function useGameSync() {
       }
     };
 
-    // Premier fetch immédiat
+    // Fetch initial seulement
     fetchState();
 
-    // Polling simple toutes les 3 secondes
-    const interval = setInterval(fetchState, POLL_INTERVAL);
+    // Fetch quand la fenêtre redevient visible (utilisateur revient sur l'onglet)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchState();
+      }
+    };
 
-    return () => clearInterval(interval);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [isAuthenticated, user, isAdmin, setWaitingForStart]);
 
-  return {};
+  // Exposer une fonction pour refresh manuel si nécessaire
+  return {
+    refresh: async () => {
+      if (!isAuthenticated || !user || isAdmin) return;
+      const response = await fetch(API_BASE);
+      if (response.ok) {
+        const data = await response.json();
+        const currentIsStarted = data.isStarted || false;
+        if (currentIsStarted !== lastIsStartedRef.current) {
+          lastIsStartedRef.current = currentIsStarted;
+          if (currentIsStarted) {
+            setWaitingForStart(false);
+          } else if (data.accessCode) {
+            setWaitingForStart(true);
+          }
+        }
+      }
+    }
+  };
 }

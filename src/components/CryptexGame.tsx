@@ -114,11 +114,22 @@ export function CryptexGame() {
     }
   }, [user?.username]);
 
-  // Initial fetch and polling - intervalle plus long pour éviter les reboots
+  // Fetch initial seulement + quand la fenêtre redevient visible
   useEffect(() => {
-    fetchGameState();
-    const interval = setInterval(fetchGameState, 4000); // 4 secondes au lieu de 2
-    return () => clearInterval(interval);
+    fetchGameState(); // Fetch initial
+    
+    // Fetch quand la fenêtre redevient visible (utilisateur revient sur l'onglet)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchGameState();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [fetchGameState]);
 
   // Track current round ID to only reset when it actually changes
@@ -216,6 +227,9 @@ export function CryptexGame() {
             }),
           });
 
+          // Rafraîchir l'état après avoir complété
+          fetchGameState();
+
           if (gameInfo.gameMode === 'controlled') {
             // Mode contrôlé: marquer comme trouvé, attendre la prochaine manche
             setHasFoundCurrentRound(true);
@@ -223,6 +237,7 @@ export function CryptexGame() {
             // Mode libre: passer à la manche suivante après 2 secondes
             setTimeout(() => {
               completeRound(currentRoundIndex, 0);
+              fetchGameState(); // Rafraîchir après changement de round
             }, 2000);
           }
         } else {

@@ -107,13 +107,22 @@ export function AdminPanel() {
     }
   }, [storedAccessCode]);
 
-  // Polling simple toutes les 3 secondes
+  // Fetch initial seulement + quand la fenêtre redevient visible
   useEffect(() => {
-    fetchGameState(); // Premier fetch immédiat
+    fetchGameState(); // Fetch initial
     
-    const interval = setInterval(fetchGameState, 3000);
-    
-    return () => clearInterval(interval);
+    // Fetch quand la fenêtre redevient visible (admin revient sur l'onglet)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchGameState();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [fetchGameState]);
 
   const handleEditRound = (round: RoundConfig) => {
