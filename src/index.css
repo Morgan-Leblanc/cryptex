@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 @theme {
-  --font-display: "Cinzel", serif;
-  --font-body: "EB Garamond", serif;
-  --font-runes: "Noto Sans Symbols 2", sans-serif;
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-body: Georgia, "Times New Roman", serif;
+  --font-runes: "Segoe UI Symbol", "Apple Symbols", sans-serif;
   
   /* Palette Indiana Jones - Tons terre, parchemin, or antique */
   --color-parchment-50: #faf6f0;
@@ -40,38 +40,7 @@
   --color-ancient-muted: #8b7355;
 }
 
-/* Polices aventurières */
-@font-face {
-  font-family: 'Cinzel';
-  src: url('https://fonts.gstatic.com/s/cinzel/v23/8vIU7ww63mVu7gtR-kwKxNvkNOjw-tbnfY3lCA.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Cinzel';
-  src: url('https://fonts.gstatic.com/s/cinzel/v23/8vIU7ww63mVu7gtR-kwKxNvkNOjw-jTgfY3lCA.woff2') format('woff2');
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'EB Garamond';
-  src: url('https://fonts.gstatic.com/s/ebgaramond/v27/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-6_RkC49_Sz-tFQ.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'EB Garamond';
-  src: url('https://fonts.gstatic.com/s/ebgaramond/v27/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-6_RkBI5_Sz-tFQ.woff2') format('woff2');
-  font-weight: 500;
-  font-style: italic;
-  font-display: swap;
-}
+/* Polices système - pas de chargement externe pour éviter les erreurs 404 */
 
 * {
   box-sizing: border-box;

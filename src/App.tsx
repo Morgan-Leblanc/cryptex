@@ -62,20 +62,9 @@ function App() {
       return <CodeEntry key="code" />;
     }
 
-    // Authentifié mais pas de session → login (sauf si on a déjà un accessCode, alors on attend)
+    // Authentifié mais pas de session → login
+    // Note: Si on avait un accessCode mais la reconnexion a échoué, on montre le login
     if (!session) {
-      // Si on a un accessCode, on est déjà connecté, juste attendre la reconnexion
-      if (accessCode && user) {
-        // Afficher un loader pendant la reconnexion
-        return (
-          <div className="min-h-screen flex items-center justify-center bg-stone-950">
-            <div className="text-center">
-              <Loader2 className="w-8 h-8 text-amber-500 animate-spin mx-auto mb-4" />
-              <p className="text-amber-700">Reconnexion...</p>
-            </div>
-          </div>
-        );
-      }
       return <Login key="login" />;
     }
 
