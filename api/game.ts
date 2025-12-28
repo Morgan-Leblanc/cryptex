@@ -1,42 +1,53 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { Redis } from '@upstash/redis';
+import { MongoClient, Db } from 'mongodb';
 
 // ============================================
-// STORAGE - Upstash Redis (gratuit, persistant)
+// STORAGE - MongoDB Atlas (gratuit, persistant)
 // ============================================
-let redis: Redis | null = null;
+let cachedClient: MongoClient | null = null;
+let cachedDb: Db | null = null;
 
-function getRedis(): Redis {
-  if (!redis) {
-    // Essayer les variables Vercel KV d'abord, puis Upstash
-    const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-    
-    if (!url || !token) {
-      throw new Error('Redis not configured. Set KV_REST_API_URL/KV_REST_API_TOKEN or UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN');
-    }
-    
-    redis = new Redis({ url, token });
-    console.log('✅ Redis initialized');
+async function getDb(): Promise<Db> {
+  if (cachedDb) {
+    return cachedDb;
   }
-  return redis;
+
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error('MONGODB_URI environment variable not set');
+  }
+
+  const client = new MongoClient(uri);
+  await client.connect();
+  
+  cachedClient = client;
+  cachedDb = client.db('cryptex');
+  
+  console.log('✅ MongoDB connected');
+  return cachedDb;
 }
 
 async function kvGet<T>(key: string): Promise<T | null> {
   try {
-    const data = await getRedis().get<T>(key);
-    return data;
+    const db = await getDb();
+    const doc = await db.collection('gameState').findOne({ _id: key as any });
+    return doc ? (doc.data as T) : null;
   } catch (error) {
-    console.error('Redis GET error:', error);
+    console.error('MongoDB GET error:', error);
     return null;
   }
 }
 
 async function kvSet(key: string, value: unknown): Promise<void> {
   try {
-    await getRedis().set(key, value);
+    const db = await getDb();
+    await db.collection('gameState').updateOne(
+      { _id: key as any },
+      { $set: { data: value, updatedAt: new Date() } },
+      { upsert: true }
+    );
   } catch (error) {
-    console.error('Redis SET error:', error);
+    console.error('MongoDB SET error:', error);
   }
 }
 
