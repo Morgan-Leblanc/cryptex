@@ -1,10 +1,10 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Clock, Users, LogOut, Loader2, Flame } from 'lucide-react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
-const POLL_INTERVAL = 2000;
+const POLL_INTERVAL = 1500; // 1.5 secondes pour détecter rapidement le lancement
 
 // Torche animée
 function AnimatedTorch({ side }: { side: 'left' | 'right' }) {
@@ -49,6 +49,7 @@ export function WaitingRoom() {
   const [dots, setDots] = useState('');
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const lastStartedAtRef = useRef<string | null>(null); // Pour détecter le lancement
 
   // Animate dots
   useEffect(() => {
@@ -74,23 +75,48 @@ export function WaitingRoom() {
         }
       }
       
-      // Récupérer l'état du jeu
-      const response = await fetch(`${API_BASE}?admin=true`);
+      // Récupérer l'état du jeu (endpoint normal, pas admin)
+      const response = await fetch(API_BASE);
       if (response.ok) {
         const data = await response.json();
-        // Extract player info with avatars
-        if (data.players && Array.isArray(data.players)) {
-          setPlayers(data.players.map((p: { username: string; avatar?: string }) => ({
-            username: p.username,
-            avatar: p.avatar,
-          })));
-        } else if (data.connectedPlayers && Array.isArray(data.connectedPlayers)) {
-          // Fallback sur connectedPlayers si players n'est pas disponible
-          setPlayers(data.connectedPlayers.map((name: string) => ({ username: name })));
+        
+        // Détecter les changements de isStarted via startedAt
+        const startedAtChanged = data.startedAt !== lastStartedAtRef.current;
+        if (startedAtChanged && data.startedAt) {
+          lastStartedAtRef.current = data.startedAt;
         }
         
-        if (data.isStarted) {
+        // Vérifier si la partie est lancée - PRIORITÉ ABSOLUE
+        if (data.isStarted || startedAtChanged) {
           setWaitingForStart(false);
+          // Mettre à jour immédiatement le store pour que App.tsx change de vue
+          // Ne pas continuer, le composant va changer
+          return;
+        } else {
+          // Partie pas encore lancée
+          setWaitingForStart(true);
+        }
+        
+        // Récupérer la liste des joueurs depuis l'endpoint admin (pour avoir les avatars)
+        try {
+          const adminResponse = await fetch(`${API_BASE}?admin=true`);
+          if (adminResponse.ok) {
+            const adminData = await adminResponse.json();
+            // Extract player info with avatars
+            if (adminData.players && Array.isArray(adminData.players)) {
+              setPlayers(adminData.players.map((p: { username: string; avatar?: string }) => ({
+                username: p.username,
+                avatar: p.avatar,
+              })));
+            } else if (adminData.connectedPlayers && Array.isArray(adminData.connectedPlayers)) {
+              setPlayers(adminData.connectedPlayers.map((name: string) => ({ username: name })));
+            }
+          }
+        } catch {
+          // Si l'endpoint admin échoue, utiliser les données de base
+          if (data.connectedPlayers && Array.isArray(data.connectedPlayers)) {
+            setPlayers(data.connectedPlayers.map((name: string) => ({ username: name })));
+          }
         }
       }
     } catch (error) {

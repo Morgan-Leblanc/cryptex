@@ -2,9 +2,9 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
-const BASE_POLL_INTERVAL = 5000; // 5 secondes de base
+const BASE_POLL_INTERVAL = 2000; // 2 secondes de base (plus rapide pour détecter le lancement)
 const MAX_POLL_INTERVAL = 30000; // Max 30 secondes
-const DEBOUNCE_DELAY = 500; // 500ms de debounce
+const DEBOUNCE_DELAY = 300; // 300ms de debounce (plus rapide)
 
 interface CachedState {
   data: any;
@@ -25,6 +25,7 @@ export function useGameSync() {
   const cacheRef = useRef<CachedState | null>(null);
   const errorCountRef = useRef(0);
   const lastSuccessRef = useRef(Date.now());
+  const lastStartedAtRef = useRef<string | null>(null); // Pour détecter les changements de isStarted
 
   // Debounced sync function
   const syncWithServer = useCallback(async (immediate = false) => {
@@ -37,21 +38,25 @@ export function useGameSync() {
 
     const performSync = async () => {
       try {
-        // Vérifier le cache d'abord
+        // Vérifier le cache d'abord (mais toujours vérifier isStarted)
         const now = Date.now();
-        if (cacheRef.current && !immediate) {
-          const cacheAge = now - cacheRef.current.timestamp;
-          // Si le cache a moins de 2 secondes, on l'utilise
-          if (cacheAge < 2000) {
-            const cachedData = cacheRef.current.data;
-            if (!isAdmin && cachedData) {
+        const shouldUseCache = cacheRef.current && !immediate && (now - cacheRef.current.timestamp) < 1000;
+        
+        // Si on utilise le cache, vérifier quand même si isStarted a changé
+        if (shouldUseCache && cacheRef.current) {
+          const cachedData = cacheRef.current.data;
+          const startedAtChanged = cachedData?.startedAt !== lastStartedAtRef.current;
+          
+          // Si startedAt a changé, on doit faire la requête pour avoir les nouvelles données
+          if (!startedAtChanged && cachedData) {
+            if (!isAdmin) {
               if (cachedData.isStarted) {
                 setWaitingForStart(false);
-              } else if (cachedData.isActive) {
+              } else if (cachedData.isActive || cachedData.accessCode) {
                 setWaitingForStart(true);
               }
             }
-            return;
+            return; // Utiliser le cache seulement si startedAt n'a pas changé
           }
         }
 
@@ -78,6 +83,25 @@ export function useGameSync() {
         
         const data = await response.json();
         
+        // Détecter les changements de isStarted via startedAt
+        const startedAtChanged = data.startedAt !== lastStartedAtRef.current;
+        if (startedAtChanged && data.startedAt) {
+          // La partie vient d'être lancée !
+          lastStartedAtRef.current = data.startedAt;
+          // Invalider le cache pour forcer une mise à jour immédiate
+          cacheRef.current = null;
+          
+          // Pour les joueurs : mettre à jour immédiatement isWaitingForStart
+          if (!isAdmin) {
+            if (data.isStarted) {
+              setWaitingForStart(false);
+            }
+          }
+        } else if (data.startedAt) {
+          // Mettre à jour la référence même si pas de changement
+          lastStartedAtRef.current = data.startedAt;
+        }
+        
         // Mettre en cache
         cacheRef.current = {
           data,
@@ -88,7 +112,7 @@ export function useGameSync() {
         errorCountRef.current = 0;
         lastSuccessRef.current = Date.now();
         
-        // Pour les joueurs : juste vérifier si le jeu est lancé
+        // Pour les joueurs : vérifier si le jeu est lancé - PRIORITÉ ABSOLUE
         // NE JAMAIS modifier isAuthenticated ou user - juste isWaitingForStart
         if (!isAdmin) {
           if (data.isStarted) {

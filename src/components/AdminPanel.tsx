@@ -108,13 +108,20 @@ export function AdminPanel() {
       return;
     }
 
-    // Vérifier le cache d'abord (max 2 secondes)
+    // Vérifier le cache d'abord (max 1 seconde pour détecter les changements rapidement)
     const now = Date.now();
-    if (cacheRef.current.data && (now - cacheRef.current.timestamp) < 2000) {
+    if (cacheRef.current.data && (now - cacheRef.current.timestamp) < 1000) {
       const cachedData = cacheRef.current.data;
-      setGameState(cachedData);
-      setIsLoading(false);
-      return;
+      // Toujours vérifier si isStarted ou startedAt a changé
+      const currentStartedAt = cachedData.startedAt;
+      const lastStartedAt = gameState?.startedAt;
+      
+      // Si startedAt a changé, on doit faire la requête
+      if (currentStartedAt === lastStartedAt) {
+        setGameState(cachedData);
+        setIsLoading(false);
+        return;
+      }
     }
 
     isFetchingRef.current = true;
