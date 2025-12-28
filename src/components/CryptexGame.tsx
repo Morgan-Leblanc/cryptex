@@ -60,45 +60,23 @@ export function CryptexGame() {
         const data = await response.json();
         
         // Mettre à jour les rounds avec les indices révélés
+        // TOUJOURS mettre à jour pour garantir la synchronisation
         const newRounds = data.rounds || [];
-        const revealedHints = data.revealedHints || [];
+        const revealedHintsData = data.revealedHints || [];
         
         // Enrichir les rounds avec le nombre d'indices révélés
         const enrichedRounds = newRounds.map((r: RoundConfig, i: number) => ({
           ...r,
-          revealedHints: revealedHints[i] || 0,
+          revealedHints: revealedHintsData[i] || 0,
         }));
         
-        setRounds(prevRounds => {
-          // Comparer les rounds: ID + indices révélés
-          const hasChanged = prevRounds.length === 0 || 
-              prevRounds.length !== enrichedRounds.length ||
-              prevRounds.some((r, i) => 
-                r.id !== enrichedRounds[i]?.id || 
-                r.revealedHints !== enrichedRounds[i]?.revealedHints
-              );
-          
-          if (hasChanged) {
-            return enrichedRounds;
-          }
-          return prevRounds; // Garder les anciens si identiques
-        });
+        setRounds(enrichedRounds);
         
-        // Mettre à jour gameInfo seulement si ça a vraiment changé
-        setGameInfo(prev => {
-          const newInfo = {
-            gameMode: data.gameMode || 'free',
-            currentRound: data.currentRound || 0,
-            roundActive: data.roundActive || false,
-          };
-          
-          // Ne mettre à jour que si quelque chose a changé
-          if (prev.gameMode !== newInfo.gameMode ||
-              prev.currentRound !== newInfo.currentRound ||
-              prev.roundActive !== newInfo.roundActive) {
-            return newInfo;
-          }
-          return prev; // Garder l'ancien état
+        // TOUJOURS mettre à jour gameInfo pour garantir la synchronisation
+        setGameInfo({
+          gameMode: data.gameMode || 'free',
+          currentRound: data.currentRound || 0,
+          roundActive: data.roundActive ?? false,
         });
       }
       
@@ -183,24 +161,20 @@ export function CryptexGame() {
     }
   }, [session, user, accessCode, checkReconnect, isRestoring]);
 
-  // Polling en mode contrôlé: détecter les changements (indices, manches, etc.)
-  // Ce useEffect est TOUJOURS appelé (pas conditionnel) mais le polling est activé conditionnellement
+  // Polling TOUJOURS actif pour détecter les changements:
+  // - Le lancement d'une manche
+  // - La révélation d'un indice  
+  // - Le passage à la manche suivante
+  // - La fin de partie
+  // - Changement de mode
   useEffect(() => {
-    // En mode contrôlé, on poll toujours pour détecter:
-    // - Le lancement d'une manche
-    // - La révélation d'un indice
-    // - Le passage à la manche suivante
-    // - La fin de partie
-    const needsPolling = gameInfo.gameMode === 'controlled';
-    
-    if (!needsPolling) return;
-    
+    // Polling plus fréquent (2 secondes) pour une meilleure réactivité
     const interval = setInterval(() => {
       fetchGameState();
-    }, 3000);
+    }, 2000);
     
     return () => clearInterval(interval);
-  }, [gameInfo.gameMode, fetchGameState]);
+  }, [fetchGameState]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
