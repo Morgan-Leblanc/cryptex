@@ -53,17 +53,17 @@ function App() {
       );
     }
 
-    // PROTECTION : Si on a un accessCode et un user, on est connecté (même si isAuthenticated est false)
-    // Cela évite les rollbacks dus aux erreurs de synchronisation
-    const hasValidConnection = (user && accessCode) || (isAuthenticated && user);
-
-    // Pas authentifié ET pas de connexion valide → écran de code
-    if (!hasValidConnection) {
+    // Pas authentifié → écran de code
+    if (!isAuthenticated) {
       return <CodeEntry key="code" />;
     }
 
-    // Authentifié mais pas de session → login
-    // Note: Si on avait un accessCode mais la reconnexion a échoué, on montre le login
+    // Authentifié mais pas de user → login
+    if (!user) {
+      return <Login key="login" />;
+    }
+
+    // User mais pas de session → login (reconnexion échouée)
     if (!session) {
       return <Login key="login" />;
     }
@@ -90,9 +90,11 @@ function App() {
   // Créer une clé stable basée sur la vue actuelle (pas sur tous les états)
   const viewKey = (() => {
     if (!isHydrated || isReconnecting) return 'loading';
-    if (!user && !isAuthenticated) return 'code';
+    if (!isAuthenticated) return 'code';
+    if (!user) return 'login';
+    if (!session) return 'login';
     if (isAdmin) return 'admin';
-    if (session?.isComplete) return 'victory';
+    if (session.isComplete) return 'victory';
     if (isWaitingForStart) return 'waiting';
     return 'game';
   })();
