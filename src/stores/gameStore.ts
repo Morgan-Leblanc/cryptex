@@ -182,7 +182,7 @@ export const useGameStore = create<GameState>()(
           avatar: avatar || undefined,
         };
 
-        // Pour l'admin, pas besoin de rejoindre via API
+        // Pour l'admin, accès direct au panel
         if (isAdmin) {
           set({ 
             user, 
@@ -194,46 +194,26 @@ export const useGameStore = create<GameState>()(
           return;
         }
 
-        // Call API to join game
-        try {
-          const response = await fetch(`${API_BASE}?action=join`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, avatar }),
-          });
-          
-          if (!response.ok) {
-            const errorData = await response.json();
-            return { 
-              error: errorData.error || 'Join failed', 
-              message: errorData.message || 'Impossible de rejoindre la partie' 
-            };
-          }
+        // Pour les joueurs normaux : juste stocker le user, PAS d'appel API join
+        // Ils devront entrer le code de partie dans WaitingRoom pour vraiment rejoindre
+        const session: GameSession = {
+          userId,
+          username,
+          currentRound: 0,
+          roundsCompleted: [false, false, false, false, false, false],
+          roundScores: [0, 0, 0, 0, 0, 0],
+          startedAt: new Date().toISOString(),
+          isComplete: false,
+        };
 
-          const joinData = await response.json();
-
-          const session: GameSession = {
-            userId,
-            username,
-            currentRound: 0,
-            roundsCompleted: [false, false, false, false, false, false],
-            roundScores: [0, 0, 0, 0, 0, 0],
-            startedAt: new Date().toISOString(),
-            isComplete: false,
-          };
-
-          set({ 
-            user, 
-            session, 
-            isAdmin: false,
-            gameId: joinData.game?.id || get().gameId,
-            isWaitingForStart: !joinData.game?.isStarted,
-            view: 'game',
-          });
-        } catch (error) {
-          console.error('Failed to join game:', error);
-          return { error: 'Network error', message: 'Erreur de connexion au serveur' };
-        }
+        set({ 
+          user, 
+          session, 
+          isAdmin: false,
+          // gameId reste null - sera défini quand ils entreront le code de partie
+          isWaitingForStart: true,
+          view: 'game',
+        });
       },
 
       logout: async () => {

@@ -45,7 +45,7 @@ interface PlayerInfo {
 }
 
 export function WaitingRoom() {
-  const { user, logout, setWaitingForStart, gameId, joinGameWithCode, login } = useGameStore();
+  const { user, logout, setWaitingForStart, gameId, joinGameWithCode } = useGameStore();
   const [dots, setDots] = useState('');
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -102,17 +102,33 @@ export function WaitingRoom() {
     setJoinError(null);
 
     try {
+      // D'abord valider le code de partie
       const result = await joinGameWithCode(code);
       
       if (result.error) {
         setJoinError(result.message || 'Code invalide');
         setGameCode(['', '', '', '', '', '']);
         codeInputRefs.current[0]?.focus();
-      } else {
-        // Code valide, maintenant rejoindre avec le username
-        if (user) {
-          await login(user.username, user.avatar);
+        setIsJoining(false);
+        return;
+      }
+      
+      // Code valide ! Maintenant appeler l'API pour vraiment rejoindre
+      if (user) {
+        const joinResponse = await fetch(`${API_BASE}?action=join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user.username, avatar: user.avatar }),
+        });
+        
+        if (!joinResponse.ok) {
+          const errorData = await joinResponse.json();
+          setJoinError(errorData.message || 'Impossible de rejoindre');
+          setGameCode(['', '', '', '', '', '']);
+          codeInputRefs.current[0]?.focus();
         }
+        // Si ok, le store a déjà été mis à jour par joinGameWithCode
+        // et le composant va se re-render pour afficher la salle d'attente normale
       }
     } catch {
       setJoinError('Erreur de connexion');
