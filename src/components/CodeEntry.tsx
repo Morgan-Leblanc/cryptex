@@ -305,8 +305,7 @@ export function CodeEntry() {
           transition={{ delay: 1.2 }}
           className="text-amber-800/80 text-xs sm:text-sm text-center font-body italic mt-4"
         >
-          Joueurs : code de la partie<br />
-          <span className="text-amber-700/50">Admin : tapez ADMIN</span>
+          Entrez le code de la partie
         </motion.p>
       </motion.div>
       
