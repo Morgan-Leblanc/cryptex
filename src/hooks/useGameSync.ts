@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
@@ -11,6 +11,9 @@ export function useGameSync() {
     isAdmin, 
     setWaitingForStart,
   } = useGameStore();
+  
+  // Garder une référence de l'état précédent pour éviter les mises à jour inutiles
+  const lastIsStartedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated || !user || isAdmin) return;
@@ -22,15 +25,23 @@ export function useGameSync() {
         if (response.ok) {
           const data = await response.json();
           
-          // Mettre à jour isWaitingForStart basé sur isStarted
-          if (data.isStarted) {
-            setWaitingForStart(false);
-          } else if (data.accessCode) {
-            setWaitingForStart(true);
+          // Ne mettre à jour que si isStarted a vraiment changé
+          const currentIsStarted = data.isStarted || false;
+          
+          if (currentIsStarted !== lastIsStartedRef.current) {
+            lastIsStartedRef.current = currentIsStarted;
+            
+            // Mettre à jour isWaitingForStart basé sur isStarted
+            if (currentIsStarted) {
+              setWaitingForStart(false);
+            } else if (data.accessCode) {
+              setWaitingForStart(true);
+            }
           }
         }
       } catch (error) {
         console.error('Failed to sync:', error);
+        // En cas d'erreur, ne rien changer
       }
     };
 

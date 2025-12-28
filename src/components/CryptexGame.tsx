@@ -51,28 +51,60 @@ export function CryptexGame() {
   const [wheelResults, setWheelResults] = useState<(boolean | null)[]>(Array(WHEEL_COUNT).fill(null));
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Fetch game state from API (includes mode info)
+  // Fetch game state from API (includes mode info) - avec protection contre les réinitialisations
   const fetchGameState = useCallback(async () => {
     try {
       const response = await fetch(API_BASE);
       if (response.ok) {
         const data = await response.json();
-        setRounds(data.rounds || []);
-        setGameInfo({
-          gameMode: data.gameMode || 'free',
-          currentRound: data.currentRound || 0,
-          roundActive: data.roundActive || false,
+        
+        // Ne mettre à jour les rounds que s'ils ont changé (par ID)
+        const newRounds = data.rounds || [];
+        setRounds(prevRounds => {
+          // Comparer par ID pour éviter les réinitialisations inutiles
+          if (prevRounds.length === 0 || 
+              prevRounds.length !== newRounds.length ||
+              prevRounds.some((r, i) => r.id !== newRounds[i]?.id)) {
+            return newRounds;
+          }
+          return prevRounds; // Garder les anciens si identiques
+        });
+        
+        // Mettre à jour gameInfo seulement si ça a vraiment changé
+        setGameInfo(prev => {
+          const newInfo = {
+            gameMode: data.gameMode || 'free',
+            currentRound: data.currentRound || 0,
+            roundActive: data.roundActive || false,
+          };
+          
+          // Ne mettre à jour que si quelque chose a changé
+          if (prev.gameMode !== newInfo.gameMode ||
+              prev.currentRound !== newInfo.currentRound ||
+              prev.roundActive !== newInfo.roundActive) {
+            return newInfo;
+          }
+          return prev; // Garder l'ancien état
         });
       }
       
       // Also fetch player state to get hasFoundCurrentRound
       if (user?.username) {
-        const playerResponse = await fetch(`${API_BASE}/player/${encodeURIComponent(user.username)}`);
-        if (playerResponse.ok) {
-          const playerData = await playerResponse.json();
-          if (playerData.hasFoundCurrentRound !== undefined) {
-            setHasFoundCurrentRound(playerData.hasFoundCurrentRound);
+        try {
+          const playerResponse = await fetch(`${API_BASE}/player/${encodeURIComponent(user.username)}`);
+          if (playerResponse.ok) {
+            const playerData = await playerResponse.json();
+            if (playerData.hasFoundCurrentRound !== undefined) {
+              setHasFoundCurrentRound(prev => {
+                // Ne mettre à jour que si ça a changé
+                return prev !== playerData.hasFoundCurrentRound 
+                  ? playerData.hasFoundCurrentRound 
+                  : prev;
+              });
+            }
           }
+        } catch {
+          // Ignorer les erreurs de player endpoint
         }
       }
     } catch (error) {
@@ -82,15 +114,16 @@ export function CryptexGame() {
     }
   }, [user?.username]);
 
-  // Initial fetch and polling
+  // Initial fetch and polling - intervalle plus long pour éviter les reboots
   useEffect(() => {
     fetchGameState();
-    const interval = setInterval(fetchGameState, 2000);
+    const interval = setInterval(fetchGameState, 4000); // 4 secondes au lieu de 2
     return () => clearInterval(interval);
   }, [fetchGameState]);
 
   // Track current round ID to only reset when it actually changes
   const [lastRoundId, setLastRoundId] = useState<number | null>(null);
+  const [lastGameMode, setLastGameMode] = useState<'free' | 'controlled' | null>(null);
 
   // Reset when round actually changes (not just when reference updates from polling)
   useEffect(() => {
@@ -98,16 +131,24 @@ export function CryptexGame() {
       ? gameInfo.currentRound 
       : (round?.id ?? null);
     
-    // Only reset if the round ID actually changed
-    if (roundId !== null && roundId !== lastRoundId) {
+    // Only reset if the round ID OR game mode actually changed
+    const roundChanged = roundId !== null && roundId !== lastRoundId;
+    const modeChanged = gameInfo.gameMode !== lastGameMode;
+    
+    if (roundChanged || modeChanged) {
       setLastRoundId(roundId);
-      setWheels(Array(WHEEL_COUNT).fill('A'));
-      setWheelResults(Array(WHEEL_COUNT).fill(null));
-      setShowSuccess(false);
-      setHasFoundCurrentRound(false);
-      setStartTime(Date.now());
+      setLastGameMode(gameInfo.gameMode);
+      
+      // Seulement reset si on change vraiment de round (pas juste un refresh)
+      if (roundChanged) {
+        setWheels(Array(WHEEL_COUNT).fill('A'));
+        setWheelResults(Array(WHEEL_COUNT).fill(null));
+        setShowSuccess(false);
+        setHasFoundCurrentRound(false);
+        setStartTime(Date.now());
+      }
     }
-  }, [gameInfo.currentRound, gameInfo.gameMode, round?.id, lastRoundId]);
+  }, [gameInfo.currentRound, gameInfo.gameMode, round?.id, lastRoundId, lastGameMode]);
 
   // Timer
   useEffect(() => {

@@ -97,10 +97,20 @@ function App() {
     return <CryptexGame key="game" />;
   };
 
+  // Créer une clé stable basée sur la vue actuelle (pas sur tous les états)
+  const viewKey = (() => {
+    if (!isHydrated || isReconnecting) return 'loading';
+    if (!user && !isAuthenticated) return 'code';
+    if (isAdmin) return 'admin';
+    if (session?.isComplete) return 'victory';
+    if (isWaitingForStart) return 'waiting';
+    return 'game';
+  })();
+
   return (
     <AnimatePresence mode="wait">
       <motion.div
-        key={`${isAuthenticated}-${isAdmin}-${isWaitingForStart}-${session?.isComplete}-${isHydrated}`}
+        key={viewKey}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
