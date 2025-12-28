@@ -20,7 +20,6 @@ interface GameState {
   // Actions
   setView: (view: AppView) => void;
   validateCode: (code: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
-  joinGameWithCode: (gameCode: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
   createGame: (code: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
   login: (username: string, avatar?: string) => Promise<{ error: string; message: string } | void>;
   logout: () => Promise<void>;
@@ -49,26 +48,27 @@ export const useGameStore = create<GameState>()(
 
       setView: (view) => set({ view }),
 
-      // Valider le code d'accès à l'app (code fixe 2026)
+      // Valider le code d'accès
       validateCode: async (code) => {
-        // Code fixe pour accéder à l'application
-        if (code === '2026') {
+        const upperCode = code.toUpperCase();
+        
+        // Code spécial pour l'admin : "ADMIN" ou "ADMIN1" etc.
+        if (upperCode.startsWith('ADMIN')) {
           set({ 
             isAuthenticated: true, 
             view: 'login',
+            gameId: null,
+            accessCode: null,
           });
           return { success: true };
         }
-        return { error: 'Invalid code', message: 'Code invalide' };
-      },
-
-      // Rejoindre une partie avec le code de partie
-      joinGameWithCode: async (gameCode: string) => {
+        
+        // Pour les joueurs : valider le code de partie via API
         try {
           const response = await fetch(`${API_BASE}?action=validate-code`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: gameCode }),
+            body: JSON.stringify({ code }),
           });
           
           const data = await response.json();
@@ -76,17 +76,19 @@ export const useGameStore = create<GameState>()(
           if (!response.ok) {
             return { 
               error: data.error, 
-              message: data.message || 'Code de partie invalide' 
+              message: data.message || 'Code invalide' 
             };
           }
           
           set({ 
+            isAuthenticated: true, 
+            view: 'login',
             gameId: data.gameId,
-            accessCode: gameCode.toUpperCase(),
+            accessCode: upperCode,
           });
           return { success: true };
         } catch (error) {
-          console.error('Failed to join game:', error);
+          console.error('Failed to validate code:', error);
           return { error: 'Network error', message: 'Erreur de connexion au serveur' };
         }
       },
@@ -182,7 +184,7 @@ export const useGameStore = create<GameState>()(
           avatar: avatar || undefined,
         };
 
-        // Pour l'admin, accès direct au panel
+        // Pour l'admin, pas besoin de rejoindre via API
         if (isAdmin) {
           set({ 
             user, 
@@ -194,26 +196,46 @@ export const useGameStore = create<GameState>()(
           return;
         }
 
-        // Pour les joueurs normaux : juste stocker le user, PAS d'appel API join
-        // Ils devront entrer le code de partie dans WaitingRoom pour vraiment rejoindre
-        const session: GameSession = {
-          userId,
-          username,
-          currentRound: 0,
-          roundsCompleted: [false, false, false, false, false, false],
-          roundScores: [0, 0, 0, 0, 0, 0],
-          startedAt: new Date().toISOString(),
-          isComplete: false,
-        };
+        // Call API to join game
+        try {
+          const response = await fetch(`${API_BASE}?action=join`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, avatar }),
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            return { 
+              error: errorData.error || 'Join failed', 
+              message: errorData.message || 'Impossible de rejoindre la partie' 
+            };
+          }
 
-        set({ 
-          user, 
-          session, 
-          isAdmin: false,
-          // gameId reste null - sera défini quand ils entreront le code de partie
-          isWaitingForStart: true,
-          view: 'game',
-        });
+          const joinData = await response.json();
+
+          const session: GameSession = {
+            userId,
+            username,
+            currentRound: 0,
+            roundsCompleted: [false, false, false, false, false, false],
+            roundScores: [0, 0, 0, 0, 0, 0],
+            startedAt: new Date().toISOString(),
+            isComplete: false,
+          };
+
+          set({ 
+            user, 
+            session, 
+            isAdmin: false,
+            gameId: joinData.game?.id || get().gameId,
+            isWaitingForStart: !joinData.game?.isStarted,
+            view: 'game',
+          });
+        } catch (error) {
+          console.error('Failed to join game:', error);
+          return { error: 'Network error', message: 'Erreur de connexion au serveur' };
+        }
       },
 
       logout: async () => {

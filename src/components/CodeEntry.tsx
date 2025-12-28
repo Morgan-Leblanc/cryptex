@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { useGameStore } from '../stores/gameStore';
 
 // Symboles mystérieux décoratifs
@@ -36,9 +36,11 @@ function DustParticle({ delay }: { delay: number }) {
 }
 
 export function CodeEntry() {
-  const [code, setCode] = useState(['', '', '', '']);
+  const [code, setCode] = useState(['', '', '', '', '', '']);
   const [error, setError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const validateCode = useGameStore((s) => s.validateCode);
 
@@ -47,30 +49,39 @@ export function CodeEntry() {
   }, []);
 
   const handleChange = async (index: number, value: string) => {
-    // Seulement des chiffres
-    if (!/^\d*$/.test(value)) return;
+    // Accepter lettres et chiffres
+    if (!/^[a-zA-Z0-9]*$/.test(value)) return;
     
     const newCode = [...code];
-    newCode[index] = value.slice(-1);
+    newCode[index] = value.slice(-1).toUpperCase();
     setCode(newCode);
     setError(false);
+    setErrorMessage(null);
 
-    if (value && index < 3) {
+    if (value && index < 5) {
       inputRefs.current[index + 1]?.focus();
     }
 
-    if (newCode.every((c) => c !== '')) {
-      const fullCode = newCode.join('');
+    // Vérifier si le code est complet (6 caractères) ou si c'est "ADMIN" (5 caractères)
+    const fullCode = newCode.join('');
+    const isComplete = newCode.every((c) => c !== '');
+    const isAdminCode = fullCode.toUpperCase() === 'ADMIN';
+    
+    if (isComplete || (isAdminCode && newCode.slice(0, 5).every((c) => c !== ''))) {
+      const codeToValidate = isAdminCode ? 'ADMIN' : fullCode;
+      setIsLoading(true);
       
       setTimeout(async () => {
-        const result = await validateCode(fullCode);
+        const result = await validateCode(codeToValidate);
+        setIsLoading(false);
         
         if (result.error) {
           setError(true);
+          setErrorMessage(result.message || 'Code invalide');
           setShake(true);
           setTimeout(() => {
             setShake(false);
-            setCode(['', '', '', '']);
+            setCode(['', '', '', '', '', '']);
             inputRefs.current[0]?.focus();
           }, 600);
         }
@@ -212,14 +223,14 @@ export function CodeEntry() {
         <motion.div
           animate={shake ? { x: [-10, 10, -10, 10, 0] } : {}}
           transition={{ duration: 0.5 }}
-          className="flex gap-3 sm:gap-4 mb-6"
+          className="flex gap-2 sm:gap-3 mb-6"
         >
           {code.map((digit, index) => (
             <motion.div
               key={index}
               initial={{ opacity: 0, y: 20, rotateX: 90 }}
               animate={{ opacity: 1, y: 0, rotateX: 0 }}
-              transition={{ delay: 0.7 + index * 0.1, type: 'spring' }}
+              transition={{ delay: 0.7 + index * 0.08, type: 'spring' }}
               className="relative"
             >
               {/* Decorative frame */}
@@ -232,15 +243,15 @@ export function CodeEntry() {
               <input
                 ref={(el) => { inputRefs.current[index] = el; }}
                 type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
+                inputMode="text"
                 maxLength={1}
                 value={digit}
                 onChange={(e) => handleChange(index, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(index, e)}
+                disabled={isLoading}
                 className={`
-                  relative w-14 h-18 sm:w-16 sm:h-20 text-center text-3xl sm:text-4xl font-display font-bold
-                  rounded-lg transition-all duration-300 outline-none
+                  relative w-11 h-14 sm:w-12 sm:h-16 text-center text-2xl sm:text-3xl font-display font-bold
+                  rounded-lg transition-all duration-300 outline-none uppercase
                   ${error
                     ? 'bg-red-950 border-2 border-red-500 text-red-400'
                     : digit
@@ -248,6 +259,7 @@ export function CodeEntry() {
                       : 'bg-stone-900/90 border-2 border-stone-700 text-stone-400'
                   }
                   focus:border-amber-400
+                  disabled:opacity-50
                 `}
                 style={{
                   boxShadow: digit 
@@ -259,6 +271,18 @@ export function CodeEntry() {
           ))}
         </motion.div>
 
+        {/* Loading indicator */}
+        {isLoading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center gap-2 text-amber-400 mb-4"
+          >
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-sm">Vérification...</span>
+          </motion.div>
+        )}
+
         {/* Error Message */}
         <AnimatePresence>
           {error && (
@@ -266,10 +290,10 @@ export function CodeEntry() {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="flex items-center gap-2 text-red-400 mb-4 text-sm bg-red-950/50 px-4 py-2 rounded-lg border border-red-800"
+              className="flex items-center gap-2 text-red-400 mb-4 text-sm bg-red-950/50 px-4 py-2 rounded-lg border border-red-800 max-w-xs text-center"
             >
-              <AlertCircle className="w-4 h-4" />
-              <span className="font-body">Le mécanisme se bloque...</span>
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span className="font-body">{errorMessage || 'Le mécanisme se bloque...'}</span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -279,9 +303,10 @@ export function CodeEntry() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1.2 }}
-          className="text-amber-800/80 text-sm text-center font-body italic mt-4"
+          className="text-amber-800/80 text-xs sm:text-sm text-center font-body italic mt-4"
         >
-          « L'année du renouveau... »
+          Joueurs : code de la partie<br />
+          <span className="text-amber-700/50">Admin : tapez ADMIN</span>
         </motion.p>
       </motion.div>
       

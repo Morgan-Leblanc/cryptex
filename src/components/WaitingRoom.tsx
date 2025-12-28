@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, Users, LogOut, Loader2, Flame, KeyRound, AlertCircle } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import { Clock, Users, LogOut, Loader2, Flame } from 'lucide-react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
@@ -45,16 +45,10 @@ interface PlayerInfo {
 }
 
 export function WaitingRoom() {
-  const { user, logout, setWaitingForStart, gameId, joinGameWithCode } = useGameStore();
+  const { user, logout, setWaitingForStart } = useGameStore();
   const [dots, setDots] = useState('');
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  
-  // État pour rejoindre une partie
-  const [gameCode, setGameCode] = useState(['', '', '', '', '', '']);
-  const [isJoining, setIsJoining] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
-  const codeInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Animate dots
   useEffect(() => {
@@ -63,79 +57,6 @@ export function WaitingRoom() {
     }, 500);
     return () => clearInterval(interval);
   }, []);
-
-  // Focus first input on mount if no gameId
-  useEffect(() => {
-    if (!gameId) {
-      codeInputRefs.current[0]?.focus();
-    }
-  }, [gameId]);
-
-  // Handle game code input
-  const handleCodeChange = (index: number, value: string) => {
-    if (!/^[a-zA-Z0-9]*$/.test(value)) return;
-    
-    const newCode = [...gameCode];
-    newCode[index] = value.slice(-1).toUpperCase();
-    setGameCode(newCode);
-    setJoinError(null);
-
-    if (value && index < 5) {
-      codeInputRefs.current[index + 1]?.focus();
-    }
-  };
-
-  const handleCodeKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !gameCode[index] && index > 0) {
-      codeInputRefs.current[index - 1]?.focus();
-    }
-  };
-
-  const handleJoinGame = async () => {
-    const code = gameCode.join('');
-    if (code.length < 4) {
-      setJoinError('Code trop court (minimum 4 caractères)');
-      return;
-    }
-
-    setIsJoining(true);
-    setJoinError(null);
-
-    try {
-      // D'abord valider le code de partie
-      const result = await joinGameWithCode(code);
-      
-      if (result.error) {
-        setJoinError(result.message || 'Code invalide');
-        setGameCode(['', '', '', '', '', '']);
-        codeInputRefs.current[0]?.focus();
-        setIsJoining(false);
-        return;
-      }
-      
-      // Code valide ! Maintenant appeler l'API pour vraiment rejoindre
-      if (user) {
-        const joinResponse = await fetch(`${API_BASE}?action=join`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: user.username, avatar: user.avatar }),
-        });
-        
-        if (!joinResponse.ok) {
-          const errorData = await joinResponse.json();
-          setJoinError(errorData.message || 'Impossible de rejoindre');
-          setGameCode(['', '', '', '', '', '']);
-          codeInputRefs.current[0]?.focus();
-        }
-        // Si ok, le store a déjà été mis à jour par joinGameWithCode
-        // et le composant va se re-render pour afficher la salle d'attente normale
-      }
-    } catch {
-      setJoinError('Erreur de connexion');
-    } finally {
-      setIsJoining(false);
-    }
-  };
 
   // Poll for game state
   const fetchGameState = useCallback(async () => {
@@ -178,147 +99,6 @@ export function WaitingRoom() {
   };
 
   if (!user) return null;
-
-  // Si pas de gameId, afficher l'écran pour rejoindre une partie
-  if (!gameId) {
-    return (
-      <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center p-6 relative overflow-hidden bg-stone-texture">
-        <div className="torch-glow absolute inset-0 pointer-events-none" />
-        <AnimatedTorch side="left" />
-        <AnimatedTorch side="right" />
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="relative z-10 w-full max-w-md"
-        >
-          {/* Header */}
-          <div className="text-center mb-8">
-            <motion.div 
-              className="inline-block mb-6"
-              animate={{ y: [0, -5, 0] }}
-              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-            >
-              <div 
-                className="relative w-20 h-20 rounded-full flex items-center justify-center"
-                style={{
-                  background: 'conic-gradient(from 0deg, #8b4513, #d4af37, #ffd700, #d4af37, #8b4513)',
-                  boxShadow: '0 0 30px rgba(212, 175, 55, 0.4)',
-                }}
-              >
-                <div 
-                  className="w-14 h-14 rounded-full flex items-center justify-center"
-                  style={{ background: 'radial-gradient(circle at 30% 30%, #8b4513, #3d1f08)' }}
-                >
-                  <KeyRound className="w-7 h-7 text-amber-200" />
-                </div>
-              </div>
-            </motion.div>
-            
-            <h1 
-              className="font-display text-2xl sm:text-3xl font-bold tracking-wide mb-2"
-              style={{
-                background: 'linear-gradient(180deg, #f5ede0 0%, #d4af37 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-              }}
-            >
-              Rejoindre une Partie
-            </h1>
-            <p className="text-amber-600 text-sm">
-              Entrez le code fourni par le maître du jeu
-            </p>
-          </div>
-
-          {/* User info */}
-          <div className="flex items-center justify-center gap-3 mb-6">
-            {user.avatar ? (
-              <img 
-                src={user.avatar} 
-                alt={user.username}
-                className="w-10 h-10 rounded-full object-cover border-2 border-amber-500"
-              />
-            ) : (
-              <div 
-                className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-stone-900"
-                style={{ background: 'linear-gradient(135deg, #d4af37 0%, #8b6914 100%)' }}
-              >
-                {user.username.charAt(0).toUpperCase()}
-              </div>
-            )}
-            <span className="text-amber-200 font-display">{user.username}</span>
-          </div>
-
-          {/* Code Input */}
-          <div className="card-parchment p-6">
-            <div className="flex gap-2 justify-center mb-4">
-              {gameCode.map((char, index) => (
-                <input
-                  key={index}
-                  ref={(el) => { codeInputRefs.current[index] = el; }}
-                  type="text"
-                  maxLength={1}
-                  value={char}
-                  onChange={(e) => handleCodeChange(index, e.target.value)}
-                  onKeyDown={(e) => handleCodeKeyDown(index, e)}
-                  disabled={isJoining}
-                  className="w-10 h-12 sm:w-12 sm:h-14 text-center text-xl sm:text-2xl font-display font-bold rounded-lg bg-stone-900 border-2 border-stone-700 text-amber-200 focus:border-amber-500 outline-none uppercase transition-all disabled:opacity-50"
-                  style={{
-                    boxShadow: char 
-                      ? '0 0 20px rgba(212, 175, 55, 0.2)' 
-                      : 'inset 0 2px 8px rgba(0,0,0,0.4)',
-                  }}
-                />
-              ))}
-            </div>
-
-            {/* Error */}
-            <AnimatePresence>
-              {joinError && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="flex items-center justify-center gap-2 text-red-400 text-sm mb-4"
-                >
-                  <AlertCircle className="w-4 h-4" />
-                  <span>{joinError}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Join Button */}
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={handleJoinGame}
-              disabled={gameCode.filter(c => c).length < 4 || isJoining}
-              className="w-full py-3 rounded-xl font-display font-bold uppercase tracking-wider bg-gradient-to-r from-amber-600 to-amber-700 text-stone-900 shadow-lg shadow-amber-900/30 hover:from-amber-500 hover:to-amber-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {isJoining ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Connexion...
-                </>
-              ) : (
-                'Rejoindre'
-              )}
-            </motion.button>
-          </div>
-
-          {/* Logout */}
-          <button
-            onClick={handleLogout}
-            disabled={isLoggingOut}
-            className="mt-6 mx-auto flex items-center gap-2 text-stone-500 hover:text-red-400 transition-colors text-sm"
-          >
-            <LogOut className="w-4 h-4" />
-            Changer d'identité
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center p-6 relative overflow-hidden bg-stone-texture">
