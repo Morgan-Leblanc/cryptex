@@ -20,6 +20,9 @@ interface GameState {
   // Admin session (unique per browser)
   adminSessionId: string | null;
   
+  // Admin JWT token
+  adminToken: string | null;
+  
   // Actions
   setView: (view: AppView) => void;
   validateCode: (code: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
@@ -34,6 +37,8 @@ interface GameState {
   endGame: () => Promise<void>;
   clearGameData: () => void;
   forceLogout: () => void;
+  adminLogin: (password: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
+  verifyAdminToken: () => Promise<boolean>;
 }
 
 const ADMIN_USERNAME = 'admin2026';
@@ -51,6 +56,7 @@ export const useGameStore = create<GameState>()(
       accessCode: null,
       isWaitingForStart: false,
       adminSessionId: null,
+      adminToken: null,
 
       setView: (view) => set({ view }),
 
@@ -371,6 +377,72 @@ export const useGameStore = create<GameState>()(
         }
       },
 
+      // Admin login avec JWT
+      adminLogin: async (password) => {
+        try {
+          const response = await fetch(`${API_BASE}?action=admin-auth`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: ADMIN_USERNAME, password }),
+          });
+          
+          const data = await response.json();
+          
+          if (!response.ok) {
+            return { 
+              error: data.error, 
+              message: data.message || 'Authentification échouée' 
+            };
+          }
+          
+          // Stocker le token et connecter l'admin
+          const user: User = {
+            id: `admin_${Date.now()}`,
+            username: ADMIN_USERNAME,
+            createdAt: new Date().toISOString(),
+            currentRound: 0,
+            completedRounds: [],
+            totalScore: 0,
+          };
+          
+          set({ 
+            user, 
+            isAdmin: true, 
+            isAuthenticated: true,
+            isWaitingForStart: false,
+            adminToken: data.token,
+            adminSessionId: `jwt_${Date.now()}`,
+            view: 'game',
+          });
+          
+          return { success: true };
+        } catch (error) {
+          console.error('Admin login failed:', error);
+          return { error: 'Network error', message: 'Erreur de connexion au serveur' };
+        }
+      },
+
+      // Vérifier si le token admin est encore valide
+      verifyAdminToken: async () => {
+        const { adminToken } = get();
+        
+        if (!adminToken) return false;
+        
+        try {
+          const response = await fetch(`${API_BASE}?action=admin-verify`, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${adminToken}`,
+            },
+          });
+          
+          return response.ok;
+        } catch {
+          return false;
+        }
+      },
+
       logout: async () => {
         const { isAdmin } = get();
         
@@ -398,6 +470,7 @@ export const useGameStore = create<GameState>()(
           accessCode: null,
           isWaitingForStart: false,
           adminSessionId: null,
+          adminToken: null,
         });
       },
 
@@ -502,6 +575,7 @@ export const useGameStore = create<GameState>()(
           accessCode: null,
           isWaitingForStart: false,
           adminSessionId: null,
+          adminToken: null,
         });
       },
     }),
@@ -514,6 +588,7 @@ export const useGameStore = create<GameState>()(
         user: state.user,
         session: state.session,
         isAdmin: state.isAdmin,
+        adminToken: state.adminToken,
         gameId: state.gameId,
         accessCode: state.accessCode,
         adminSessionId: state.adminSessionId,

@@ -1,25 +1,56 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowRight, Loader2, Compass, Map, ScrollText, AlertTriangle, Camera, User } from 'lucide-react';
+import { ArrowRight, Loader2, Compass, Map, ScrollText, AlertTriangle, Camera, User, Lock, Shield } from 'lucide-react';
 import { useGameStore } from '../stores/gameStore';
 import { GiphyPicker } from './GiphyPicker';
 
+const ADMIN_USERNAME = 'admin2026';
+
 export function Login() {
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [avatar, setAvatar] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showGiphyPicker, setShowGiphyPicker] = useState(false);
+  
   const login = useGameStore((s) => s.login);
+  const adminLogin = useGameStore((s) => s.adminLogin);
+
+  // Détecter si l'utilisateur entre le nom admin
+  const isAdminLogin = username.toLowerCase() === ADMIN_USERNAME.toLowerCase();
+
+  // Reset password quand on change de username
+  useEffect(() => {
+    if (!isAdminLogin) {
+      setPassword('');
+    }
+  }, [isAdminLogin]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (username.trim().length >= 2 && !isLoading) {
+      // Si c'est l'admin, vérifier qu'il y a un mot de passe
+      if (isAdminLogin && !password) {
+        setError('Mot de passe requis pour l\'administrateur');
+        return;
+      }
+      
       setIsLoading(true);
       setError(null);
+      
       try {
-        const result = await login(username.trim(), avatar);
+        let result;
+        
+        if (isAdminLogin) {
+          // Authentification admin avec JWT
+          result = await adminLogin(password);
+        } else {
+          // Login normal pour les joueurs
+          result = await login(username.trim(), avatar);
+        }
+        
         if (result && 'error' in result) {
           setError(result.message || 'Impossible de rejoindre la partie');
         }
@@ -31,7 +62,7 @@ export function Login() {
     }
   };
 
-  const isValid = username.trim().length >= 2;
+  const isValid = username.trim().length >= 2 && (!isAdminLogin || password.length >= 4);
 
   return (
     <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center p-6 relative overflow-hidden bg-stone-texture">
@@ -187,7 +218,7 @@ export function Login() {
                 />
               </motion.div>
               
-              {username && !isValid && (
+              {username && !isAdminLogin && username.length < 2 && (
                 <motion.p
                   initial={{ opacity: 0, y: -5 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -197,6 +228,35 @@ export function Login() {
                 </motion.p>
               )}
             </div>
+
+            {/* Admin password field */}
+            {isAdminLogin && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="relative"
+              >
+                <label className="block text-sm font-medium text-amber-200/70 mb-2 flex items-center gap-2">
+                  <Shield className="w-4 h-4" />
+                  <span>Mot de passe administrateur</span>
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-amber-500/50" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    disabled={isLoading}
+                    className="input-ancient w-full text-lg pl-12"
+                    autoComplete="current-password"
+                  />
+                </div>
+                <p className="text-xs text-amber-500/50 mt-2">
+                  Accès réservé à l'administrateur de la partie
+                </p>
+              </motion.div>
+            )}
 
             {/* Error message */}
             {error && (

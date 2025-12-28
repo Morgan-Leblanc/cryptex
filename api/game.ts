@@ -1,5 +1,46 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { MongoClient, Db } from 'mongodb';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+
+// ============================================
+// ADMIN AUTH CONFIG
+// ============================================
+const JWT_SECRET = process.env.JWT_SECRET || 'cryptex-admin-secret-key-change-in-production';
+const ADMIN_USERNAME = 'admin2026';
+// Hash du mot de passe par défaut "admin2026" - à changer en production
+const DEFAULT_ADMIN_PASSWORD_HASH = '$2a$10$X5Y7Z8K9L0M1N2O3P4Q5R6S7T8U9V0W1X2Y3Z4A5B6C7D8E9F0G1H2';
+
+interface AdminUser {
+  username: string;
+  passwordHash: string;
+  createdAt: string;
+}
+
+interface JWTPayload {
+  username: string;
+  isAdmin: boolean;
+  iat: number;
+  exp: number;
+}
+
+// Vérifier le token JWT
+function verifyAdminToken(token: string): JWTPayload | null {
+  try {
+    return jwt.verify(token, JWT_SECRET) as JWTPayload;
+  } catch {
+    return null;
+  }
+}
+
+// Générer un token JWT
+function generateAdminToken(username: string): string {
+  return jwt.sign(
+    { username, isAdmin: true },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+}
 
 // ============================================
 // STORAGE - MongoDB Atlas (gratuit, persistant)
@@ -149,6 +190,55 @@ async function kvDelete(key: string): Promise<boolean> {
     console.error('MongoDB DELETE error:', error);
     return false;
   }
+}
+
+// ============================================
+// ADMIN USER MANAGEMENT
+// ============================================
+const ADMIN_KEY = 'cryptex:admin';
+
+async function getAdminUser(): Promise<AdminUser | null> {
+  try {
+    const db = await getDb();
+    const doc = await db.collection('admin').findOne<{ data: AdminUser }>({ _id: ADMIN_KEY as any });
+    return doc?.data || null;
+  } catch (error) {
+    console.error('Failed to get admin user:', error);
+    return null;
+  }
+}
+
+async function createAdminUser(username: string, password: string): Promise<AdminUser> {
+  const passwordHash = await bcrypt.hash(password, 10);
+  const admin: AdminUser = {
+    username,
+    passwordHash,
+    createdAt: new Date().toISOString(),
+  };
+  
+  try {
+    const db = await getDb();
+    await db.collection('admin').updateOne(
+      { _id: ADMIN_KEY as any },
+      { $set: { data: admin, updatedAt: new Date() } },
+      { upsert: true }
+    );
+  } catch (error) {
+    console.error('Failed to create admin user:', error);
+  }
+  
+  return admin;
+}
+
+async function verifyAdminPassword(password: string): Promise<boolean> {
+  let admin = await getAdminUser();
+  
+  // Si pas d'admin, créer le compte par défaut
+  if (!admin) {
+    admin = await createAdminUser(ADMIN_USERNAME, 'admin2026');
+  }
+  
+  return bcrypt.compare(password, admin.passwordHash);
 }
 
 // ============================================
@@ -662,8 +752,114 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(200).json({ success: true, game: gameState, resetAt: resetTimestamp });
         }
 
+        // ============================================
+        // ADMIN AUTH WITH JWT
+        // ============================================
+        case 'admin-auth': {
+          const { username, password } = body;
+          
+          if (!username || !password) {
+            return res.status(400).json({ 
+              error: 'Credentials required',
+              message: 'Nom d\'utilisateur et mot de passe requis'
+            });
+          }
+          
+          // Vérifier que c'est bien l'admin
+          if (username.toLowerCase() !== ADMIN_USERNAME.toLowerCase()) {
+            return res.status(401).json({ 
+              error: 'Invalid credentials',
+              message: 'Identifiants invalides'
+            });
+          }
+          
+          // Vérifier le mot de passe
+          const isValid = await verifyAdminPassword(password);
+          if (!isValid) {
+            return res.status(401).json({ 
+              error: 'Invalid credentials',
+              message: 'Mot de passe incorrect'
+            });
+          }
+          
+          // Générer le token JWT
+          const token = generateAdminToken(username);
+          
+          // Enregistrer la session admin
+          gameState.adminSessionId = `jwt_${Date.now()}`;
+          gameState.adminConnectedAt = new Date().toISOString();
+          await setGameState(gameState);
+          
+          return res.status(200).json({ 
+            success: true,
+            token,
+            message: 'Connexion réussie',
+            expiresIn: '24h',
+          });
+        }
+
+        // Vérifier le token JWT
+        case 'admin-verify': {
+          const authHeader = req.headers.authorization;
+          if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ 
+              error: 'No token',
+              message: 'Token manquant'
+            });
+          }
+          
+          const token = authHeader.substring(7);
+          const payload = verifyAdminToken(token);
+          
+          if (!payload) {
+            return res.status(401).json({ 
+              error: 'Invalid token',
+              message: 'Token invalide ou expiré'
+            });
+          }
+          
+          return res.status(200).json({ 
+            success: true,
+            admin: { username: payload.username },
+          });
+        }
+
+        // Changer le mot de passe admin
+        case 'admin-change-password': {
+          const { currentPassword, newPassword } = body;
+          const authHeader = req.headers.authorization;
+          
+          // Vérifier le token
+          if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Unauthorized' });
+          }
+          
+          const token = authHeader.substring(7);
+          const payload = verifyAdminToken(token);
+          if (!payload) {
+            return res.status(401).json({ error: 'Invalid token' });
+          }
+          
+          // Vérifier l'ancien mot de passe
+          const isValid = await verifyAdminPassword(currentPassword);
+          if (!isValid) {
+            return res.status(401).json({ 
+              error: 'Wrong password',
+              message: 'Mot de passe actuel incorrect'
+            });
+          }
+          
+          // Créer le nouveau mot de passe
+          await createAdminUser(ADMIN_USERNAME, newPassword);
+          
+          return res.status(200).json({ 
+            success: true,
+            message: 'Mot de passe modifié avec succès'
+          });
+        }
+
         // Créer une nouvelle partie (admin)
-        // Admin login - vérifie qu'il n'y a pas déjà un admin connecté
+        // Admin login - vérifie qu'il n'y a pas déjà un admin connecté (legacy)
         case 'admin-login': {
           const { sessionId } = body;
           if (!sessionId) {
