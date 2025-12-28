@@ -64,12 +64,23 @@ export function CryptexGame() {
           roundActive: data.roundActive || false,
         });
       }
+      
+      // Also fetch player state to get hasFoundCurrentRound
+      if (user?.username) {
+        const playerResponse = await fetch(`${API_BASE}/player/${encodeURIComponent(user.username)}`);
+        if (playerResponse.ok) {
+          const playerData = await playerResponse.json();
+          if (playerData.hasFoundCurrentRound !== undefined) {
+            setHasFoundCurrentRound(playerData.hasFoundCurrentRound);
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to fetch game state:', error);
     } finally {
       setIsLoadingRounds(false);
     }
-  }, []);
+  }, [user?.username]);
 
   // Initial fetch and polling
   useEffect(() => {
@@ -218,7 +229,20 @@ export function CryptexGame() {
   }
 
   if (!session || !user) {
-    return null;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-stone-texture">
+        <div className="torch-glow absolute inset-0 pointer-events-none" />
+        <div className="text-center">
+          <p className="text-amber-400 mb-4">Session expirée ou invalide</p>
+          <button
+            onClick={handleLogout}
+            className="px-6 py-3 rounded-lg bg-amber-600 text-stone-900 font-display font-semibold"
+          >
+            Retour à l'accueil
+          </button>
+        </div>
+      </div>
+    );
   }
 
   // Mode contrôlé: attendre que l'admin lance la manche

@@ -25,6 +25,13 @@ export function useGameSync() {
       if (response.ok) {
         const data = await response.json();
         
+        // Check if game is still active
+        if (!isAdmin && !data.isActive) {
+          console.log('Game is no longer active, logging out...');
+          await logout();
+          return;
+        }
+
         // Check if game was reset - force logout for all players
         if (!isAdmin && data.resetAt) {
           // Initialize lastKnownReset on first sync
