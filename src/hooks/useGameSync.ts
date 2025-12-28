@@ -48,20 +48,12 @@ export function useGameSync() {
     };
 
     // Fetch initial seulement
+    // PAS de visibilitychange - on reste stable en waiting room
+    // Le changement vers le jeu se fera via un refresh manuel ou après une action
     fetchState();
 
-    // Fetch quand la fenêtre redevient visible (utilisateur revient sur l'onglet)
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        fetchState();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
+    // Pas de polling ni de visibility change - on reste stable
+    // L'utilisateur peut rafraîchir manuellement si nécessaire
   }, [isAuthenticated, user, isAdmin, isWaitingForStart, setWaitingForStart]);
 
   // Exposer une fonction pour refresh manuel si nécessaire

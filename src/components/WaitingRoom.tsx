@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
@@ -14,6 +15,7 @@ export function WaitingRoom() {
   const [dots, setDots] = useState('');
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Animation des points
   useEffect(() => {
@@ -62,27 +64,14 @@ export function WaitingRoom() {
     }
   }, [setWaitingForStart]);
 
-  // Utiliser useRef pour éviter les re-renders dus aux dépendances
-  const fetchGameStateRef = useRef(fetchGameState);
-  fetchGameStateRef.current = fetchGameState;
-
+  // Fetch initial SEULEMENT - pas de refresh automatique en waiting room
+  // On reste stable, le changement de vue se fera via useGameSync qui détecte isStarted
   useEffect(() => {
-    // Fetch initial
-    fetchGameStateRef.current();
-    
-    // Fetch quand la fenêtre redevient visible
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        fetchGameStateRef.current();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []); // Dépendances vides - fetchGameStateRef est stable
+    // Fetch initial seulement
+    fetchGameState();
+    // PAS de visibilitychange listener - on reste stable en waiting room
+    // Le changement vers le jeu se fera automatiquement via useGameSync quand isStarted devient true
+  }, [fetchGameState]);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -147,7 +136,19 @@ export function WaitingRoom() {
             </div>
           </div>
 
-          <div className="text-center">
+          <div className="text-center space-y-3">
+            <button
+              onClick={async () => {
+                setIsRefreshing(true);
+                await fetchGameState();
+                setIsRefreshing(false);
+              }}
+              disabled={isRefreshing}
+              className="px-6 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 transition-colors flex items-center gap-2 mx-auto"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              {isRefreshing ? 'Rafraîchissement...' : 'Rafraîchir'}
+            </button>
             <button
               onClick={handleLogout}
               disabled={isLoggingOut}

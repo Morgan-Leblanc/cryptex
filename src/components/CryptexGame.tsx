@@ -114,28 +114,13 @@ export function CryptexGame() {
     }
   }, [user?.username]);
 
-  // Fetch initial seulement + quand la fenêtre redevient visible
-  // Utiliser useRef pour éviter les re-renders dus aux dépendances
-  const fetchGameStateRef = useRef(fetchGameState);
-  fetchGameStateRef.current = fetchGameState;
-
+  // Fetch initial SEULEMENT - pas de refresh automatique pendant le jeu
+  // Une fois dans le jeu, on reste stable pour éviter les interruptions
   useEffect(() => {
-    // Fetch initial
-    fetchGameStateRef.current();
-    
-    // Fetch quand la fenêtre redevient visible (utilisateur revient sur l'onglet)
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        fetchGameStateRef.current();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []); // Dépendances vides - fetchGameStateRef est stable
+    // Fetch initial seulement
+    fetchGameState();
+    // PAS de visibilitychange listener - on reste stable pendant le jeu
+  }, [fetchGameState]);
 
   // Track current round ID to only reset when it actually changes
   const [lastRoundId, setLastRoundId] = useState<number | null>(null);
