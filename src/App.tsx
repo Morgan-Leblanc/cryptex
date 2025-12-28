@@ -63,14 +63,14 @@ function App() {
       return <Login key="login" />;
     }
 
+    // Admin → panneau admin (pas besoin de session pour l'admin)
+    if (isAdmin) {
+      return <AdminPanel key="admin" />;
+    }
+
     // User mais pas de session → login (reconnexion échouée)
     if (!session) {
       return <Login key="login" />;
-    }
-
-    // Admin → panneau admin
-    if (isAdmin) {
-      return <AdminPanel key="admin" />;
     }
 
     // Partie terminée → victoire
@@ -92,8 +92,8 @@ function App() {
     if (!isHydrated || isReconnecting) return 'loading';
     if (!isAuthenticated) return 'code';
     if (!user) return 'login';
-    if (!session) return 'login';
     if (isAdmin) return 'admin';
+    if (!session) return 'login';
     if (session.isComplete) return 'victory';
     if (isWaitingForStart) return 'waiting';
     return 'game';
