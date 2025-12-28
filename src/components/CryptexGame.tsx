@@ -327,6 +327,16 @@ export function CryptexGame() {
   }
 
   // Mode contrôlé: attendre que l'admin lance la manche
+  // Polling toutes les 3 secondes pour détecter le lancement
+  useEffect(() => {
+    if (gameInfo.gameMode === 'controlled' && (!gameInfo.roundActive || gameInfo.currentRound === 0)) {
+      const interval = setInterval(() => {
+        fetchGameState();
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [gameInfo.gameMode, gameInfo.roundActive, gameInfo.currentRound, fetchGameState]);
+
   if (gameInfo.gameMode === 'controlled' && (!gameInfo.roundActive || gameInfo.currentRound === 0)) {
     return (
       <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center p-6 bg-stone-texture relative overflow-hidden">
@@ -400,6 +410,16 @@ export function CryptexGame() {
   }
 
   // Mode contrôlé: joueur a trouvé, attendre la prochaine manche
+  // Polling pour détecter le passage à la manche suivante
+  useEffect(() => {
+    if (gameInfo.gameMode === 'controlled' && hasFoundCurrentRound) {
+      const interval = setInterval(() => {
+        fetchGameState();
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [gameInfo.gameMode, hasFoundCurrentRound, fetchGameState]);
+
   if (gameInfo.gameMode === 'controlled' && hasFoundCurrentRound) {
     return (
       <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center p-6 bg-stone-texture relative overflow-hidden">
