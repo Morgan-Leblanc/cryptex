@@ -124,7 +124,7 @@ export const useGameStore = create<GameState>()(
 
       // Vérifier si le joueur peut se reconnecter
       checkReconnect: async () => {
-        const { user, isAdmin } = get();
+        const { user, isAdmin, session } = get();
         
         if (!user || isAdmin) return false;
         
@@ -136,7 +136,33 @@ export const useGameStore = create<GameState>()(
           });
           
           if (!response.ok) {
-            // La partie n'existe plus ou le joueur n'est plus enregistré
+            // Le serveur ne reconnaît pas le joueur, mais on peut avoir un problème de cold start
+            // On garde l'état local si on a une session valide
+            if (session && session.username) {
+              console.warn('Server did not recognize player, keeping local session');
+              // Essayer de re-rejoindre la partie
+              try {
+                const rejoinResponse = await fetch(`${API_BASE}?action=join`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ username: user.username, avatar: user.avatar }),
+                });
+                
+                if (rejoinResponse.ok) {
+                  const rejoinData = await rejoinResponse.json();
+                  set({
+                    isAuthenticated: true,
+                    isWaitingForStart: !rejoinData.game?.isStarted,
+                    view: 'game',
+                  });
+                  return true;
+                }
+              } catch (rejoinError) {
+                console.error('Failed to rejoin:', rejoinError);
+              }
+            }
+            
+            // Si vraiment rien ne marche, on déconnecte
             set({
               view: 'code',
               isAuthenticated: false,
@@ -166,6 +192,7 @@ export const useGameStore = create<GameState>()(
           return false;
         } catch (error) {
           console.error('Failed to check reconnect:', error);
+          // En cas d'erreur réseau, on garde l'état actuel
           return false;
         }
       },
