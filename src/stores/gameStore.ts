@@ -397,21 +397,8 @@ export const useGameStore = create<GameState>()(
     }),
     {
       name: 'cryptex-game-storage',
-      // Utiliser sessionStorage au lieu de localStorage
-      // Chaque onglet a sa propre session isolée
-      // Évite les conflits admin/joueur dans le même navigateur
-      storage: {
-        getItem: (name) => {
-          const str = sessionStorage.getItem(name);
-          return str ? JSON.parse(str) : null;
-        },
-        setItem: (name, value) => {
-          sessionStorage.setItem(name, JSON.stringify(value));
-        },
-        removeItem: (name) => {
-          sessionStorage.removeItem(name);
-        },
-      },
+      // Retour à localStorage pour la persistance
+      // Mais on génère un ID unique par onglet pour éviter les conflits
       partialize: (state) => ({
         isAuthenticated: state.isAuthenticated,
         user: state.user,

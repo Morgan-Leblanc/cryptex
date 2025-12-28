@@ -7,9 +7,25 @@ import { MongoClient, Db } from 'mongodb';
 let cachedClient: MongoClient | null = null;
 let cachedDb: Db | null = null;
 
+// Cache local pour éviter les problèmes de timing
+let localCache: { gameState: GameState | null; players: Record<string, Player> | null } = {
+  gameState: null,
+  players: null,
+};
+
 async function getDb(): Promise<Db> {
-  if (cachedDb) {
-    return cachedDb;
+  // Vérifier si la connexion existante est toujours valide
+  if (cachedDb && cachedClient) {
+    try {
+      // Ping pour vérifier la connexion
+      await cachedDb.command({ ping: 1 });
+      return cachedDb;
+    } catch {
+      // Connexion perdue, on la recrée
+      console.log('⚠️ MongoDB connection lost, reconnecting...');
+      cachedClient = null;
+      cachedDb = null;
+    }
   }
 
   const uri = process.env.MONGODB_URI;
@@ -17,7 +33,12 @@ async function getDb(): Promise<Db> {
     throw new Error('MONGODB_URI environment variable not set');
   }
 
-  const client = new MongoClient(uri);
+  const client = new MongoClient(uri, {
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  });
+  
   await client.connect();
   
   cachedClient = client;
@@ -31,14 +52,40 @@ async function kvGet<T>(key: string): Promise<T | null> {
   try {
     const db = await getDb();
     const doc = await db.collection('gameState').findOne({ _id: key as any });
-    return doc ? (doc.data as T) : null;
+    const data = doc ? (doc.data as T) : null;
+    
+    // Mettre en cache local
+    if (key === 'cryptex:gameState' && data) {
+      localCache.gameState = data as GameState;
+    } else if (key === 'cryptex:players' && data) {
+      localCache.players = data as Record<string, Player>;
+    }
+    
+    return data;
   } catch (error) {
     console.error('MongoDB GET error:', error);
+    
+    // En cas d'erreur, retourner le cache local si disponible
+    if (key === 'cryptex:gameState' && localCache.gameState) {
+      console.log('📦 Using local cache for gameState');
+      return localCache.gameState as T;
+    } else if (key === 'cryptex:players' && localCache.players) {
+      console.log('📦 Using local cache for players');
+      return localCache.players as T;
+    }
+    
     return null;
   }
 }
 
 async function kvSet(key: string, value: unknown): Promise<void> {
+  // Toujours mettre à jour le cache local d'abord
+  if (key === 'cryptex:gameState') {
+    localCache.gameState = value as GameState;
+  } else if (key === 'cryptex:players') {
+    localCache.players = value as Record<string, Player>;
+  }
+  
   try {
     const db = await getDb();
     await db.collection('gameState').updateOne(
@@ -48,6 +95,7 @@ async function kvSet(key: string, value: unknown): Promise<void> {
     );
   } catch (error) {
     console.error('MongoDB SET error:', error);
+    // Les données sont au moins dans le cache local
   }
 }
 
