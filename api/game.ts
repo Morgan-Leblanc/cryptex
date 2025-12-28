@@ -418,6 +418,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(400).json({ error: 'Invalid mode' });
           }
           gameState.gameMode = mode;
+          // Reset round tracking to avoid launching unexpected rounds
+          gameState.currentRound = 0;
+          gameState.roundActive = false;
+          gameState.roundWinners = [];
+          gameState.revealedHints = [0, 0, 0, 0, 0, 0];
+          // Reset per-player progress so the mode switch starts fresh
+          Object.values(players).forEach((player) => {
+            player.currentRound = 0;
+            player.roundStartTime = null;
+            player.hasFoundCurrentRound = false;
+            player.roundsCompleted = [false, false, false, false, false, false];
+          });
+          await setPlayers(players);
           await setGameState(gameState);
           return res.status(200).json({ success: true, gameMode: mode });
         }
