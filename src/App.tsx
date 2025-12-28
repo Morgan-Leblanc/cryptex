@@ -11,88 +11,66 @@ import { useGameSync } from './hooks/useGameSync';
 import { Loader2 } from 'lucide-react';
 
 function App() {
-  const { view, isAuthenticated, session, isAdmin, isWaitingForStart, setView, checkReconnect, user } = useGameStore();
-  const [isLoading, setIsLoading] = useState(true);
+  const { view, isAuthenticated, session, isAdmin, isWaitingForStart, user } = useGameStore();
+  const [isHydrated, setIsHydrated] = useState(false);
   
   // Use the sync hook to keep game state in sync with server
   useGameSync();
 
-  // Restore view on mount based on persisted state AND sync with server
+  // Attendre que zustand soit hydraté depuis localStorage
   useEffect(() => {
-    const initializeView = async () => {
-      setIsLoading(true);
-      
-      // Si l'utilisateur était connecté (données persistantes), essayer de reconnecter
-      if (user && !isAdmin) {
-        const reconnected = await checkReconnect();
-        if (reconnected) {
-          setIsLoading(false);
-          return;
-        }
-        // Si la reconnexion échoue, le store a déjà reset l'état
-      }
-      
-      if (!isAuthenticated) {
-        setView('code');
-      } else if (isAdmin) {
-        setView('game'); // Admin panel is shown when isAdmin
-      } else if (session?.isComplete) {
-        setView('victory');
-      } else if (session) {
-        setView('game');
-      } else {
-        setView('login');
-      }
-      
-      // Small delay to allow sync hook to run
-      await new Promise(resolve => setTimeout(resolve, 300));
-      setIsLoading(false);
-    };
-    
-    initializeView();
+    // Zustand persist hydrate est synchrone, mais on attend un tick pour être sûr
+    const timer = setTimeout(() => setIsHydrated(true), 100);
+    return () => clearTimeout(timer);
   }, []);
 
+  // Déterminer quelle vue afficher basé sur l'état SANS JAMAIS MODIFIER L'ÉTAT
   const renderView = () => {
-    // Handle admin view
-    if (isAdmin && view === 'game') {
+    // Si pas encore hydraté, on attend
+    if (!isHydrated) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-stone-950">
+          <div className="text-center">
+            <Loader2 className="w-8 h-8 text-amber-500 animate-spin mx-auto mb-4" />
+            <p className="text-amber-700">Chargement...</p>
+          </div>
+        </div>
+      );
+    }
+
+    // Pas authentifié → écran de code
+    if (!isAuthenticated || !user) {
+      return <CodeEntry key="code" />;
+    }
+
+    // Authentifié mais pas de session → login
+    if (!session) {
+      return <Login key="login" />;
+    }
+
+    // Admin → panneau admin
+    if (isAdmin) {
       return <AdminPanel key="admin" />;
     }
 
-    // Handle waiting room for players
-    if (!isAdmin && isWaitingForStart && view === 'game') {
+    // Partie terminée → victoire
+    if (session.isComplete) {
+      return <Victory key="victory" />;
+    }
+
+    // En attente du lancement → waiting room
+    if (isWaitingForStart) {
       return <WaitingRoom key="waiting" />;
     }
 
-    switch (view) {
-      case 'code':
-        return <CodeEntry key="code" />;
-      case 'login':
-        return <Login key="login" />;
-      case 'game':
-        return <CryptexGame key="game" />;
-      case 'victory':
-        return <Victory key="victory" />;
-      default:
-        return <CodeEntry key="code-default" />;
-    }
+    // Sinon → jeu
+    return <CryptexGame key="game" />;
   };
-
-  // Show loading screen while initializing
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-stone-950">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 text-amber-500 animate-spin mx-auto mb-4" />
-          <p className="text-amber-700">Chargement...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <AnimatePresence mode="wait">
       <motion.div
-        key={`${view}-${isAdmin}-${isWaitingForStart}`}
+        key={`${isAuthenticated}-${isAdmin}-${isWaitingForStart}-${session?.isComplete}-${isHydrated}`}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
