@@ -84,6 +84,13 @@ export function AdminPanel() {
   // Pour la création de partie
   const [newGameCode, setNewGameCode] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
+  const [hasSeenActiveGame, setHasSeenActiveGame] = useState(!!storedAccessCode);
+  const markActiveState = useCallback((state: GameState) => {
+    if (state.isActive) {
+      setHasSeenActiveGame(true);
+    }
+    return state;
+  }, []);
 
   // Fetch game state - SIMPLE, pas de cache complexe
   const fetchGameState = useCallback(async () => {
@@ -108,7 +115,7 @@ export function AdminPanel() {
           
           if (newHasPlayers) {
             // Nouvelles données ont des players → utiliser les nouvelles (source de vérité)
-            return data;
+            return markActiveState(data);
           } else if (prevHasPlayers && !newHasPlayers) {
             // Pas de players dans les nouvelles données mais on en avait avant
             // C'est probablement une erreur temporaire → garder les anciens
@@ -119,8 +126,8 @@ export function AdminPanel() {
               leaderboard: prevState.leaderboard || data.leaderboard,
             };
           }
-          // Pas de players du tout → utiliser les nouvelles données
-          return data;
+        // Pas de players du tout → utiliser les nouvelles données
+          return markActiveState(data);
         });
       }
     } catch (error) {
@@ -173,6 +180,7 @@ export function AdminPanel() {
         body: JSON.stringify({ roundId }),
       });
       if (response.ok) {
+        setHasSeenActiveGame(true);
         invalidateAndRefresh();
       }
     } catch (error) {
@@ -342,9 +350,10 @@ export function AdminPanel() {
     
     const result = await createGame(newGameCode);
     
-    if (result.error) {
+      if (result.error) {
       setCreateError(result.message || 'Erreur lors de la création');
     } else {
+        setHasSeenActiveGame(true);
       invalidateAndRefresh();
     }
     
@@ -420,7 +429,7 @@ export function AdminPanel() {
   // - Pas de code stocké (storedAccessCode est null/undefined)
   // - ET pas de partie active dans MongoDB
   // Si storedAccessCode existe, on NE PEUT PAS arriver ici grâce à la protection ci-dessus
-  const shouldShowCreateScreen = !storedAccessCode && gameState && !gameState.isActive;
+  const shouldShowCreateScreen = !storedAccessCode && !hasSeenActiveGame && gameState && !gameState.isActive;
   
   if (shouldShowCreateScreen) {
     return (
