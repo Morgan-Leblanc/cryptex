@@ -98,7 +98,30 @@ export function AdminPanel() {
           data.isActive = true;
         }
         
-        setGameState(data);
+        // PRÉSERVER les players existants si les nouvelles données n'en ont pas ou sont vides
+        setGameState(prevState => {
+          // Toujours utiliser les nouvelles données du serveur (source de vérité)
+          // Mais si les nouvelles données n'ont pas de players et qu'on en avait avant,
+          // c'est probablement une erreur de sync - on garde les anciens temporairement
+          const newHasPlayers = data.connectedPlayers && data.connectedPlayers.length > 0;
+          const prevHasPlayers = prevState?.connectedPlayers && prevState.connectedPlayers.length > 0;
+          
+          if (newHasPlayers) {
+            // Nouvelles données ont des players → utiliser les nouvelles (source de vérité)
+            return data;
+          } else if (prevHasPlayers && !newHasPlayers) {
+            // Pas de players dans les nouvelles données mais on en avait avant
+            // C'est probablement une erreur temporaire → garder les anciens
+            console.warn('No players in new data, keeping previous players');
+            return {
+              ...data,
+              connectedPlayers: prevState.connectedPlayers,
+              leaderboard: prevState.leaderboard || data.leaderboard,
+            };
+          }
+          // Pas de players du tout → utiliser les nouvelles données
+          return data;
+        });
       }
     } catch (error) {
       console.error('Failed to fetch game state:', error);
@@ -260,7 +283,10 @@ export function AdminPanel() {
         body: JSON.stringify({ mode }),
       });
       if (response.ok) {
-        invalidateAndRefresh();
+        // Attendre un peu pour que le serveur mette à jour, puis refresh
+        setTimeout(() => {
+          invalidateAndRefresh();
+        }, 100);
       }
     } catch (error) {
       console.error('Failed to set mode:', error);
