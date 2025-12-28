@@ -1,5 +1,50 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { kv } from '@vercel/kv';
+
+// ============================================
+// VERCEL KV - avec fallback en mémoire si non configuré
+// ============================================
+let kvClient: typeof import('@vercel/kv').kv | null = null;
+let useMemoryFallback = false;
+
+// Fallback en mémoire (pour dev local ou si KV non configuré)
+const memoryStore: Record<string, unknown> = {};
+
+async function initKV() {
+  if (kvClient !== null || useMemoryFallback) return;
+  
+  // Vérifier si les variables KV sont présentes
+  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
+    console.warn('⚠️ Vercel KV not configured - using in-memory fallback');
+    useMemoryFallback = true;
+    return;
+  }
+  
+  try {
+    const kvModule = await import('@vercel/kv');
+    kvClient = kvModule.kv;
+    console.log('✅ Vercel KV initialized');
+  } catch (error) {
+    console.error('❌ Failed to initialize KV:', error);
+    useMemoryFallback = true;
+  }
+}
+
+async function kvGet<T>(key: string): Promise<T | null> {
+  await initKV();
+  if (useMemoryFallback) {
+    return (memoryStore[key] as T) || null;
+  }
+  return kvClient!.get<T>(key);
+}
+
+async function kvSet(key: string, value: unknown): Promise<void> {
+  await initKV();
+  if (useMemoryFallback) {
+    memoryStore[key] = value;
+    return;
+  }
+  await kvClient!.set(key, value);
+}
 
 // ============================================
 // TYPES
@@ -87,10 +132,10 @@ const GAME_STATE_KEY = 'cryptex:gameState';
 const PLAYERS_KEY = 'cryptex:players';
 
 // ============================================
-// HELPERS - VERCEL KV
+// HELPERS - STORAGE (KV ou mémoire)
 // ============================================
 async function getGameState(): Promise<GameState> {
-  const state = await kv.get<GameState>(GAME_STATE_KEY);
+  const state = await kvGet<GameState>(GAME_STATE_KEY);
   if (!state) {
     return createDefaultGameState();
   }
@@ -98,16 +143,16 @@ async function getGameState(): Promise<GameState> {
 }
 
 async function setGameState(state: GameState): Promise<void> {
-  await kv.set(GAME_STATE_KEY, state);
+  await kvSet(GAME_STATE_KEY, state);
 }
 
 async function getPlayers(): Promise<Record<string, Player>> {
-  const players = await kv.get<Record<string, Player>>(PLAYERS_KEY);
+  const players = await kvGet<Record<string, Player>>(PLAYERS_KEY);
   return players || {};
 }
 
 async function setPlayers(players: Record<string, Player>): Promise<void> {
-  await kv.set(PLAYERS_KEY, players);
+  await kvSet(PLAYERS_KEY, players);
 }
 
 function createDefaultGameState(): GameState {
