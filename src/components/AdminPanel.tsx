@@ -85,9 +85,6 @@ export function AdminPanel() {
   const [newGameCode, setNewGameCode] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   
-  // Garder trace si on a déjà vu une partie active (évite les rollbacks)
-  const [hasSeenActiveGame, setHasSeenActiveGame] = useState(false);
-
   // Cache local pour éviter les requêtes inutiles
   const cacheRef = useRef<{ data: GameState | null; timestamp: number }>({ data: null, timestamp: 0 });
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -115,9 +112,6 @@ export function AdminPanel() {
     const now = Date.now();
     if (cacheRef.current.data && (now - cacheRef.current.timestamp) < 2000) {
       const cachedData = cacheRef.current.data;
-      if (cachedData.isActive) {
-        setHasSeenActiveGame(true);
-      }
       setGameState(cachedData);
       setIsLoading(false);
       return;
@@ -133,39 +127,62 @@ export function AdminPanel() {
         // Mettre en cache
         cacheRef.current = { data, timestamp: Date.now() };
         
-        // Si la partie est active, marquer qu'on l'a vue
-        if (data.isActive) {
-          setHasSeenActiveGame(true);
+        // LOGIQUE CRITIQUE : Si on a un accessCode dans le store, on NE ROLLBACK JAMAIS
+        // Même si MongoDB retourne isActive: false, c'est probablement une erreur
+        if (storedAccessCode && !data.isActive && data.accessCode === storedAccessCode) {
+          // MongoDB dit inactive mais on a le même code → erreur de sync
+          // Garder l'état actuel et forcer isActive à true
+          console.warn('MongoDB returned inactive but we have accessCode - forcing active state');
+          setGameState({ ...data, isActive: true, accessCode: storedAccessCode });
+        } else if (storedAccessCode && data.accessCode !== storedAccessCode) {
+          // Code différent → nouvelle partie ou reset, accepter
           setGameState(data);
-        } else if (hasSeenActiveGame) {
-          // On avait une partie active mais maintenant elle ne l'est plus
-          // Vérifier si c'est vraiment terminé (accessCode null) ou juste une erreur
-          if (data.accessCode === null || data.accessCode === undefined) {
-            // Vraiment terminée
-            setHasSeenActiveGame(false);
-            setGameState(data);
-          } else {
-            // Probablement une erreur de sync, garder l'ancien état du cache
-            if (cacheRef.current.data) {
-              console.warn('Ignoring inactive state - likely sync error, keeping cached state');
-            }
-          }
+        } else if (!storedAccessCode && data.isActive) {
+          // Pas de code stocké mais MongoDB dit active → mettre à jour le store
+          // (mais on ne peut pas le faire depuis ici, donc on accepte l'état)
+          setGameState(data);
         } else {
-          // Pas de partie active et on n'en a jamais vu
+          // État normal
           setGameState(data);
+        }
+      } else {
+        // Erreur HTTP - utiliser le cache si disponible
+        if (cacheRef.current.data) {
+          console.warn('HTTP error, using cached state');
+          setGameState(cacheRef.current.data);
         }
       }
     } catch (error) {
       console.error('Failed to fetch game state:', error);
       // En cas d'erreur, utiliser le cache si disponible
       if (cacheRef.current.data) {
+        console.warn('Network error, using cached state');
         setGameState(cacheRef.current.data);
+      } else if (storedAccessCode) {
+        // Pas de cache mais on a un code → créer un état minimal pour éviter rollback
+        console.warn('No cache but have accessCode - creating minimal state');
+        // Utiliser le cache ou créer un état minimal
+        const minimalState: GameState = {
+          id: 'temp',
+          rounds: [],
+          isStarted: false,
+          startedAt: null,
+          createdAt: new Date().toISOString(),
+          connectedPlayers: [],
+          gameMode: 'free',
+          currentRound: 0,
+          roundActive: false,
+          isActive: true,
+          accessCode: storedAccessCode,
+        };
+        setGameState(minimalState);
+        cacheRef.current = { data: minimalState, timestamp: Date.now() };
       }
     } finally {
       setIsLoading(false);
       isFetchingRef.current = false;
     }
-  }, [hasSeenActiveGame]);
+  }, [storedAccessCode]);
 
   // Poll for updates avec intervalle adaptatif
   useEffect(() => {
@@ -413,9 +430,11 @@ export function AdminPanel() {
     );
   }
 
-  // Écran de création de partie si aucune partie n'est active
-  // ET qu'on n'a pas déjà vu une partie active (évite les rollbacks dus aux erreurs de sync)
-  const shouldShowCreateScreen = !gameState.isActive && !hasSeenActiveGame && !storedAccessCode;
+  // Écran de création de partie UNIQUEMENT si :
+  // 1. Pas de code stocké dans le store (source de vérité)
+  // 2. ET MongoDB confirme qu'il n'y a pas de partie active
+  // Si on a un storedAccessCode, on NE ROLLBACK JAMAIS (même si MongoDB dit inactive)
+  const shouldShowCreateScreen = !storedAccessCode && (!gameState || !gameState.isActive);
   
   if (shouldShowCreateScreen) {
     return (
