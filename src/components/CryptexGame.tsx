@@ -31,7 +31,7 @@ interface GameInfo {
 }
 
 export function CryptexGame() {
-  const { session, user, completeRound, logout } = useGameStore();
+  const { session, user, completeRound, logout, checkReconnect, accessCode } = useGameStore();
   
   const [rounds, setRounds] = useState<RoundConfig[]>([]);
   const [isLoadingRounds, setIsLoadingRounds] = useState(true);
@@ -228,7 +228,43 @@ export function CryptexGame() {
     );
   }
 
-  if (!session || !user) {
+  // Si pas de session mais on a un user et accessCode, essayer de restaurer
+  const [isRestoring, setIsRestoring] = useState(false);
+  
+  useEffect(() => {
+    if (!session && user && accessCode && !isRestoring) {
+      setIsRestoring(true);
+      checkReconnect().finally(() => {
+        setIsRestoring(false);
+      });
+    }
+  }, [session, user, accessCode, checkReconnect, isRestoring]);
+  
+  if (!session && user && accessCode) {
+    // Afficher un loader pendant la restauration
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-stone-texture">
+        <div className="torch-glow absolute inset-0 pointer-events-none" />
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+          className="w-16 h-16 rounded-full"
+          style={{
+            background: 'conic-gradient(from 0deg, #3d1f08, #8b4513, #d4af37, #8b4513, #3d1f08)',
+            boxShadow: '0 0 30px rgba(212, 175, 55, 0.3)',
+          }}
+        >
+          <div className="w-full h-full rounded-full flex items-center justify-center bg-stone-950/80">
+            <Loader2 className="w-6 h-6 text-amber-500 animate-spin" />
+          </div>
+        </motion.div>
+        <p className="text-amber-400 mt-4">Restauration de la session...</p>
+      </div>
+    );
+  }
+
+  // Si vraiment pas de user, alors on peut afficher l'erreur
+  if (!user) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-stone-texture">
         <div className="torch-glow absolute inset-0 pointer-events-none" />

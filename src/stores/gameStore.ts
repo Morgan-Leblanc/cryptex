@@ -131,9 +131,14 @@ export const useGameStore = create<GameState>()(
       // Vérifier si le joueur peut se reconnecter
       // JAMAIS de déconnexion automatique - on essaie juste de resync avec le serveur
       checkReconnect: async () => {
-        const { user, isAdmin, session } = get();
+        const { user, isAdmin, session, accessCode: storedAccessCode } = get();
         
         if (!user || isAdmin) return false;
+        
+        // Si on a déjà un accessCode et une session, on est déjà connecté
+        if (storedAccessCode && session) {
+          return true;
+        }
         
         try {
           // D'abord essayer de reconnecter
@@ -146,8 +151,21 @@ export const useGameStore = create<GameState>()(
           if (response.ok) {
             const data = await response.json();
             if (data.reconnect) {
+              // Restaurer la session si elle n'existe pas
+              const currentSession = get().session;
+              const restoredSession: GameSession = currentSession || {
+                userId: user.id,
+                username: user.username,
+                currentRound: data.player?.currentRound || 0,
+                roundsCompleted: [false, false, false, false, false, false],
+                roundScores: [0, 0, 0, 0, 0, 0],
+                startedAt: new Date().toISOString(),
+                isComplete: data.player?.isFinished || false,
+              };
+              
               set({
                 isAuthenticated: true,
+                session: restoredSession,
                 gameId: data.game.id,
                 accessCode: data.game.accessCode,
                 isWaitingForStart: !data.game.isStarted,
@@ -157,8 +175,8 @@ export const useGameStore = create<GameState>()(
             }
           }
           
-          // Si le serveur ne reconnaît pas le joueur, essayer de rejoindre
-          if (session && session.username) {
+          // Si le serveur ne reconnaît pas le joueur mais on a un accessCode, essayer de rejoindre
+          if (storedAccessCode || session) {
             const rejoinResponse = await fetch(`${API_BASE}?action=join`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -167,8 +185,24 @@ export const useGameStore = create<GameState>()(
             
             if (rejoinResponse.ok) {
               const rejoinData = await rejoinResponse.json();
+              
+              // Restaurer ou créer la session
+              const currentSession = get().session;
+              const restoredSession: GameSession = currentSession || {
+                userId: user.id,
+                username: user.username,
+                currentRound: 0,
+                roundsCompleted: [false, false, false, false, false, false],
+                roundScores: [0, 0, 0, 0, 0, 0],
+                startedAt: new Date().toISOString(),
+                isComplete: false,
+              };
+              
               set({
                 isAuthenticated: true,
+                session: restoredSession,
+                gameId: rejoinData.game?.id || get().gameId,
+                accessCode: rejoinData.game?.accessCode || storedAccessCode || get().accessCode,
                 isWaitingForStart: !rejoinData.game?.isStarted,
                 view: 'game',
               });
@@ -178,14 +212,64 @@ export const useGameStore = create<GameState>()(
           
           // Même si rien ne marche côté serveur, on garde l'état local
           // Le joueur reste connecté - seul le bouton peut déconnecter
-          set({ view: 'game' });
-          return true;
+          // Si on a un accessCode, on reste connecté
+          if (storedAccessCode) {
+            // Restaurer la session minimale si elle n'existe pas
+            if (!session) {
+              const minimalSession: GameSession = {
+                userId: user.id,
+                username: user.username,
+                currentRound: 0,
+                roundsCompleted: [false, false, false, false, false, false],
+                roundScores: [0, 0, 0, 0, 0, 0],
+                startedAt: new Date().toISOString(),
+                isComplete: false,
+              };
+              set({
+                isAuthenticated: true,
+                session: minimalSession,
+                view: 'game',
+              });
+            } else {
+              set({ view: 'game' });
+            }
+            return true;
+          }
+          
+          // Pas d'accessCode et serveur ne répond pas → on garde quand même l'état si on a une session
+          if (session) {
+            set({ view: 'game' });
+            return true;
+          }
+          
+          return false;
           
         } catch (error) {
           console.error('Failed to check reconnect:', error);
           // Erreur réseau - on garde l'état actuel, pas de déconnexion
-          set({ view: 'game' });
-          return true;
+          // Si on a un accessCode ou une session, on reste connecté
+          if (storedAccessCode || session) {
+            if (!session && storedAccessCode) {
+              const minimalSession: GameSession = {
+                userId: user.id,
+                username: user.username,
+                currentRound: 0,
+                roundsCompleted: [false, false, false, false, false, false],
+                roundScores: [0, 0, 0, 0, 0, 0],
+                startedAt: new Date().toISOString(),
+                isComplete: false,
+              };
+              set({
+                isAuthenticated: true,
+                session: minimalSession,
+                view: 'game',
+              });
+            } else {
+              set({ view: 'game' });
+            }
+            return true;
+          }
+          return false;
         }
       },
 
@@ -275,6 +359,7 @@ export const useGameStore = create<GameState>()(
             session, 
             isAdmin: false,
             gameId: joinData.game?.id || get().gameId,
+            accessCode: joinData.game?.accessCode || get().accessCode, // CRITIQUE : Sauvegarder l'accessCode
             isWaitingForStart: !joinData.game?.isStarted,
             view: 'game',
           });

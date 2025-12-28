@@ -89,13 +89,16 @@ export function useGameSync() {
         lastSuccessRef.current = Date.now();
         
         // Pour les joueurs : juste vérifier si le jeu est lancé
+        // NE JAMAIS modifier isAuthenticated ou user - juste isWaitingForStart
         if (!isAdmin) {
           if (data.isStarted) {
             setWaitingForStart(false);
-          } else if (data.isActive || data.accessCode) {
+          } else if (data.accessCode || data.isActive) {
             // Si on a un accessCode, la partie existe (même si isActive est false)
             setWaitingForStart(true);
           }
+          // Si pas d'accessCode et pas isActive, on ne fait rien
+          // Le joueur reste connecté grâce à son accessCode dans le store
         }
       } catch (error) {
         console.error('Failed to sync with server:', error);
