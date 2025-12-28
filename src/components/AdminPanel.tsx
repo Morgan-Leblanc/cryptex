@@ -363,26 +363,6 @@ export function AdminPanel() {
     setActionLoading(null);
   };
 
-  // PROTECTION ABSOLUE : Si on a un accessCode stocké, on NE ROLLBACK JAMAIS
-  // Même si gameState est null ou isLoading, on crée un état minimal
-  if (storedAccessCode && !gameState) {
-    // Créer un état minimal pour éviter le rollback
-    const minimalState: GameState = {
-      id: 'temp',
-      rounds: [],
-      isStarted: false,
-      startedAt: null,
-      createdAt: new Date().toISOString(),
-      connectedPlayers: [],
-      gameMode: 'free',
-      currentRound: 0,
-      roundActive: false,
-      isActive: true, // FORCER à true
-      accessCode: storedAccessCode,
-    };
-    setGameState(minimalState);
-  }
-
   // Afficher le loader uniquement pendant le chargement initial
   if (isLoading && !gameState) {
     return (
