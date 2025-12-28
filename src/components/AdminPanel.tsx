@@ -69,7 +69,7 @@ interface GameState {
 }
 
 export function AdminPanel() {
-  const { logout, createGame, endGame } = useGameStore();
+  const { logout, createGame, endGame, accessCode: storedAccessCode } = useGameStore();
   
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -84,6 +84,9 @@ export function AdminPanel() {
   // Pour la création de partie
   const [newGameCode, setNewGameCode] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
+  
+  // Garder trace si on a déjà vu une partie active (évite les rollbacks)
+  const [hasSeenActiveGame, setHasSeenActiveGame] = useState(false);
 
   // Fetch game state
   const fetchGameState = useCallback(async () => {
@@ -91,14 +94,34 @@ export function AdminPanel() {
       const response = await fetch(`${API_BASE}?admin=true`);
       if (response.ok) {
         const data = await response.json();
-        setGameState(data);
+        
+        // Si la partie est active, marquer qu'on l'a vue
+        if (data.isActive) {
+          setHasSeenActiveGame(true);
+          setGameState(data);
+        } else if (hasSeenActiveGame) {
+          // On avait une partie active mais maintenant elle ne l'est plus
+          // Vérifier si c'est vraiment terminé (accessCode null) ou juste une erreur
+          if (data.accessCode === null || data.accessCode === undefined) {
+            // Vraiment terminée
+            setHasSeenActiveGame(false);
+            setGameState(data);
+          } else {
+            // Probablement une erreur de sync, garder l'ancien état
+            console.warn('Ignoring inactive state - likely sync error');
+          }
+        } else {
+          // Pas de partie active et on n'en a jamais vu
+          setGameState(data);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch game state:', error);
+      // En cas d'erreur, ne pas modifier l'état
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [hasSeenActiveGame]);
 
   // Poll for updates
   useEffect(() => {
@@ -331,7 +354,10 @@ export function AdminPanel() {
   }
 
   // Écran de création de partie si aucune partie n'est active
-  if (!gameState.isActive) {
+  // ET qu'on n'a pas déjà vu une partie active (évite les rollbacks dus aux erreurs de sync)
+  const shouldShowCreateScreen = !gameState.isActive && !hasSeenActiveGame && !storedAccessCode;
+  
+  if (shouldShowCreateScreen) {
     return (
       <div className="min-h-screen min-h-[100dvh] flex items-center justify-center p-6 bg-stone-texture">
         <div className="torch-glow absolute inset-0 pointer-events-none" />
