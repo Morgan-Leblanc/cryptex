@@ -9,6 +9,65 @@ let cachedDb: Db | null = null;
 
 // Pas de cache local - MongoDB est la source de vérité unique
 
+type SseClient = {
+  res: VercelResponse;
+  keepAlive: NodeJS.Timeout;
+};
+
+const sseClients = new Set<SseClient>();
+
+function sendSseEvent(res: VercelResponse, event: string, payload: unknown) {
+  const data = JSON.stringify(payload);
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${data}\n\n`);
+}
+
+function broadcastEvent(payload: unknown, event = 'game-state') {
+  for (const client of sseClients) {
+    try {
+      sendSseEvent(client.res, event, payload);
+    } catch (error) {
+      console.warn('Failed to send SSE event:', error);
+    }
+  }
+}
+
+async function broadcastLatestState() {
+  const [gameState, players] = await Promise.all([getGameState(), getPlayers()]);
+  const payload = {
+    gameState,
+    players: getPlayersForAPI(players, gameState),
+    leaderboard: getLeaderboard(players),
+  };
+  broadcastEvent(payload);
+}
+
+function registerSseClient(res: VercelResponse, payload: unknown) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+  sendSseEvent(res, 'game-state', payload);
+
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(':\n\n');
+    } catch (error) {
+      console.warn('Failed to send SSE keep-alive:', error);
+    }
+  }, 15000);
+
+  const client: SseClient = { res, keepAlive };
+  sseClients.add(client);
+
+  res.on('close', () => {
+    clearInterval(keepAlive);
+    sseClients.delete(client);
+  });
+
+  return client;
+}
+
 async function getDb(): Promise<Db> {
   // Vérifier si la connexion existante est toujours valide
   if (cachedDb && cachedClient) {
@@ -327,6 +386,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const gameState = await getGameState();
       const players = await getPlayers();
 
+      const { stream } = req.query || {};
+      if (stream === '1' || stream === 'true') {
+        const payload = {
+          gameState,
+          players: getPlayersForAPI(players, gameState),
+          leaderboard: getLeaderboard(players),
+        };
+        registerSseClient(res, payload);
+        return;
+      }
+
       // Player specific endpoint
       if (req.url?.includes('/player/')) {
         const username = req.url.split('/player/')[1]?.split('?')[0];
@@ -432,6 +502,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
           await setPlayers(players);
           await setGameState(gameState);
+          await broadcastLatestState();
           return res.status(200).json({ success: true, gameMode: mode });
         }
 
@@ -457,6 +528,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
           
           await setGameState(gameState);
+          await broadcastLatestState();
           return res.status(200).json({ success: true, game: gameState });
         }
 
@@ -486,6 +558,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           await setGameState(gameState);
           await setPlayers(players);
+          await broadcastLatestState();
 
           return res.status(200).json({ 
             success: true, 
@@ -513,6 +586,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
           
           await setGameState(gameState);
+          await broadcastLatestState();
 
           return res.status(200).json({ 
             success: true, 
@@ -542,6 +616,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           
           gameState.revealedHints[roundIndex] = currentHints + 1;
           await setGameState(gameState);
+          await broadcastLatestState();
           
           return res.status(200).json({ 
             success: true, 
@@ -556,6 +631,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           gameState.isStarted = false;
           gameState.roundActive = false;
           await setGameState(gameState);
+          await broadcastLatestState();
           return res.status(200).json({ success: true, game: gameState });
         }
 
@@ -569,6 +645,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           players = {};
           await setGameState(gameState);
           await setPlayers(players);
+          await broadcastLatestState();
           return res.status(200).json({ success: true, game: gameState, resetAt: resetTimestamp });
         }
 
@@ -615,6 +692,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           
           await setGameState(gameState);
           await setPlayers(players);
+          await broadcastLatestState();
           
           return res.status(200).json({ 
             success: true,
@@ -874,6 +952,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             gameState.roundWinners = gameState.roundWinners.filter(u => u !== leaveUser);
             await setPlayers(players);
             await setGameState(gameState);
+            await broadcastLatestState();
           }
           return res.status(200).json({ success: true });
         }
@@ -941,6 +1020,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             
             await setPlayers(players);
             await setGameState(gameState);
+            await broadcastLatestState();
             
             return res.status(200).json({
               success: true,
@@ -960,6 +1040,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             
             await setPlayers(players);
+            await broadcastLatestState();
             
             return res.status(200).json({
               success: true,
