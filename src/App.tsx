@@ -11,7 +11,7 @@ import { useGameSync } from './hooks/useGameSync';
 import { Loader2 } from 'lucide-react';
 
 function App() {
-  const { view, isAuthenticated, session, isAdmin, isWaitingForStart, setView, checkReconnect, user } = useGameStore();
+  const { view, isAuthenticated, session, isAdmin, isWaitingForStart, setView, checkReconnect, user, gameId } = useGameStore();
   const [isLoading, setIsLoading] = useState(true);
   
   // Use the sync hook to keep game state in sync with server
@@ -23,7 +23,7 @@ function App() {
       setIsLoading(true);
       
       // Si l'utilisateur était connecté (données persistantes), essayer de reconnecter
-      if (user && !isAdmin) {
+      if (user && !isAdmin && gameId) {
         const reconnected = await checkReconnect();
         if (reconnected) {
           setIsLoading(false);
@@ -58,8 +58,11 @@ function App() {
       return <AdminPanel key="admin" />;
     }
 
-    // Handle waiting room for players
-    if (!isAdmin && isWaitingForStart && view === 'game') {
+    // Handle waiting room for players (including those who need to enter game code)
+    // Players go to WaitingRoom if:
+    // 1. They don't have a gameId (need to enter game code)
+    // 2. Or the game hasn't started yet (isWaitingForStart)
+    if (!isAdmin && view === 'game' && (!gameId || isWaitingForStart)) {
       return <WaitingRoom key="waiting" />;
     }
 
