@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Settings,
@@ -84,126 +84,36 @@ export function AdminPanel() {
   // Pour la création de partie
   const [newGameCode, setNewGameCode] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
-  
-  // Cache local pour éviter les requêtes inutiles
-  const cacheRef = useRef<{ data: GameState | null; timestamp: number }>({ data: null, timestamp: 0 });
-  const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isFetchingRef = useRef(false);
 
-  // Fetch game state avec cache et debouncing
-  const fetchGameState = useCallback(async (immediate = false) => {
-    // Éviter les requêtes simultanées
-    if (isFetchingRef.current && !immediate) {
-      return;
-    }
-
-    // Debounce sauf si immédiat
-    if (!immediate) {
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
-      }
-      debounceTimeoutRef.current = setTimeout(() => {
-        fetchGameState(true);
-      }, 300);
-      return;
-    }
-
-    // Vérifier le cache d'abord (max 1 seconde pour détecter les changements rapidement)
-    const now = Date.now();
-    if (cacheRef.current.data && (now - cacheRef.current.timestamp) < 1000) {
-      const cachedData = cacheRef.current.data;
-      // Toujours vérifier si isStarted ou startedAt a changé
-      const currentStartedAt = cachedData.startedAt;
-      const lastStartedAt = gameState?.startedAt;
-      
-      // Si startedAt a changé, on doit faire la requête
-      if (currentStartedAt === lastStartedAt) {
-        setGameState(cachedData);
-        setIsLoading(false);
-        return;
-      }
-    }
-
-    isFetchingRef.current = true;
-
+  // Fetch game state - SIMPLE, pas de cache complexe
+  const fetchGameState = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}?admin=true`);
       if (response.ok) {
         const data = await response.json();
         
-        // Mettre en cache
-        cacheRef.current = { data, timestamp: Date.now() };
+        // Si on a un accessCode stocké, s'assurer qu'il est présent dans les données
+        if (storedAccessCode && !data.accessCode) {
+          data.accessCode = storedAccessCode;
+          data.isActive = true;
+        }
         
-        // LOGIQUE CRITIQUE : Si on a un accessCode dans le store, on NE ROLLBACK JAMAIS
-        // FORCER isActive à true si on a storedAccessCode
-        if (storedAccessCode) {
-          // Si on a un code stocké, la partie EST TOUJOURS active
-          // Même si MongoDB dit le contraire, c'est une erreur de sync
-          const forcedData = {
-            ...data,
-            isActive: true, // FORCER à true
-            accessCode: storedAccessCode, // Utiliser le code du store
-          };
-          setGameState(forcedData);
-          cacheRef.current = { data: forcedData, timestamp: Date.now() };
-        } else {
-          // Pas de code stocké → accepter l'état MongoDB
-          setGameState(data);
-        }
-      } else {
-        // Erreur HTTP - utiliser le cache si disponible
-        if (cacheRef.current.data) {
-          console.warn('HTTP error, using cached state');
-          setGameState(cacheRef.current.data);
-        }
+        setGameState(data);
       }
     } catch (error) {
       console.error('Failed to fetch game state:', error);
-      // En cas d'erreur, utiliser le cache si disponible
-      if (cacheRef.current.data) {
-        console.warn('Network error, using cached state');
-        setGameState(cacheRef.current.data);
-      } else if (storedAccessCode) {
-        // Pas de cache mais on a un code → créer un état minimal pour éviter rollback
-        console.warn('No cache but have accessCode - creating minimal state');
-        // Utiliser le cache ou créer un état minimal
-        const minimalState: GameState = {
-          id: 'temp',
-          rounds: [],
-          isStarted: false,
-          startedAt: null,
-          createdAt: new Date().toISOString(),
-          connectedPlayers: [],
-          gameMode: 'free',
-          currentRound: 0,
-          roundActive: false,
-          isActive: true,
-          accessCode: storedAccessCode,
-        };
-        setGameState(minimalState);
-        cacheRef.current = { data: minimalState, timestamp: Date.now() };
-      }
     } finally {
       setIsLoading(false);
-      isFetchingRef.current = false;
     }
   }, [storedAccessCode]);
 
-  // Poll for updates avec intervalle adaptatif
+  // Polling simple toutes les 3 secondes
   useEffect(() => {
-    fetchGameState(true); // Premier fetch immédiat
+    fetchGameState(); // Premier fetch immédiat
     
-    // Intervalle plus long pour l'admin (5 secondes)
-    const interval = setInterval(() => {
-      fetchGameState();
-    }, 5000);
+    const interval = setInterval(fetchGameState, 3000);
     
-    return () => {
-      clearInterval(interval);
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
-      }
-    };
+    return () => clearInterval(interval);
   }, [fetchGameState]);
 
   const handleEditRound = (round: RoundConfig) => {
@@ -267,10 +177,9 @@ export function AdminPanel() {
     setEditForm({});
   };
 
-  // Helper pour invalider le cache et rafraîchir
+  // Helper simple pour rafraîchir
   const invalidateAndRefresh = useCallback(() => {
-    cacheRef.current = { data: null, timestamp: 0 };
-    fetchGameState(true);
+    fetchGameState();
   }, [fetchGameState]);
 
   const handleStartGame = async () => {

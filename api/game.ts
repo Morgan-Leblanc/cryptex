@@ -7,11 +7,7 @@ import { MongoClient, Db } from 'mongodb';
 let cachedClient: MongoClient | null = null;
 let cachedDb: Db | null = null;
 
-// Cache local pour éviter les problèmes de timing
-let localCache: { gameState: GameState | null; players: Record<string, Player> | null } = {
-  gameState: null,
-  players: null,
-};
+// Pas de cache local - MongoDB est la source de vérité unique
 
 async function getDb(): Promise<Db> {
   // Vérifier si la connexion existante est toujours valide
@@ -48,89 +44,40 @@ async function getDb(): Promise<Db> {
   return cachedDb;
 }
 
-// Versioning pour détecter les conflits
-interface VersionedData<T> {
+// Interface simple pour MongoDB
+interface StoredData<T> {
   data: T;
-  version: number;
   updatedAt: Date;
 }
 
 async function kvGet<T>(key: string): Promise<T | null> {
   try {
     const db = await getDb();
-    const doc = await db.collection('gameState').findOne<VersionedData<T>>({ _id: key as any });
-    
-    if (!doc) {
-      return null;
-    }
-    
-    const data = doc.data;
-    
-    // Mettre en cache local avec version
-    if (key === 'cryptex:gameState' && data) {
-      localCache.gameState = data as GameState;
-    } else if (key === 'cryptex:players' && data) {
-      localCache.players = data as Record<string, Player>;
-    }
-    
-    return data;
+    const doc = await db.collection('gameState').findOne<StoredData<T>>({ _id: key as any });
+    return doc?.data || null;
   } catch (error) {
     console.error('MongoDB GET error:', error);
-    
-    // En cas d'erreur, retourner le cache local si disponible
-    if (key === 'cryptex:gameState' && localCache.gameState) {
-      console.log('📦 Using local cache for gameState');
-      return localCache.gameState as T;
-    } else if (key === 'cryptex:players' && localCache.players) {
-      console.log('📦 Using local cache for players');
-      return localCache.players as T;
-    }
-    
     return null;
   }
 }
 
-async function kvSet(key: string, value: unknown, expectedVersion?: number): Promise<{ success: boolean; version: number }> {
+async function kvSet(key: string, value: unknown): Promise<boolean> {
   try {
     const db = await getDb();
-    const now = new Date();
-    
-    // Lire la version actuelle
-    const current = await db.collection('gameState').findOne<VersionedData<unknown>>({ _id: key as any });
-    const currentVersion = current?.version || 0;
-    
-    // Si une version est attendue, vérifier qu'elle correspond (optimistic locking)
-    if (expectedVersion !== undefined && currentVersion !== expectedVersion) {
-      console.warn(`Version mismatch for ${key}: expected ${expectedVersion}, got ${currentVersion}`);
-      return { success: false, version: currentVersion };
-    }
-    
-    const newVersion = currentVersion + 1;
-    
-    // Mettre à jour avec versioning
-    const result = await db.collection('gameState').updateOne(
+    await db.collection('gameState').updateOne(
       { _id: key as any },
       { 
         $set: { 
           data: value, 
-          version: newVersion,
-          updatedAt: now 
+          updatedAt: new Date() 
         } 
       },
       { upsert: true }
     );
-    
-    // Mettre à jour le cache local
-    if (key === 'cryptex:gameState') {
-      localCache.gameState = value as GameState;
-    } else if (key === 'cryptex:players') {
-      localCache.players = value as Record<string, Player>;
-    }
-    
-    return { success: true, version: newVersion };
+    return true;
   } catch (error) {
     console.error('MongoDB SET error:', error);
-    return { success: false, version: 0 };
+    return false;
   }
 }
 
@@ -233,9 +180,8 @@ async function getGameState(): Promise<GameState> {
   return state;
 }
 
-async function setGameState(state: GameState, expectedVersion?: number): Promise<boolean> {
-  const result = await kvSet(GAME_STATE_KEY, state, expectedVersion);
-  return result.success;
+async function setGameState(state: GameState): Promise<boolean> {
+  return await kvSet(GAME_STATE_KEY, state);
 }
 
 async function getPlayers(): Promise<Record<string, Player>> {
@@ -243,9 +189,8 @@ async function getPlayers(): Promise<Record<string, Player>> {
   return players || {};
 }
 
-async function setPlayers(players: Record<string, Player>, expectedVersion?: number): Promise<boolean> {
-  const result = await kvSet(PLAYERS_KEY, players, expectedVersion);
-  return result.success;
+async function setPlayers(players: Record<string, Player>): Promise<boolean> {
+  return await kvSet(PLAYERS_KEY, players);
 }
 
 function createDefaultGameState(): GameState {
@@ -461,10 +406,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // POST - Actions (avec lock pour éviter race conditions)
     // ========================================
     if (method === 'POST') {
-      return await withLock(async () => {
-        const body = req.body || {};
-        let gameState = await getGameState();
-        let players = await getPlayers();
+      const body = req.body || {};
+      let gameState = await getGameState();
+      let players = await getPlayers();
 
       switch (action) {
         // Mode de jeu
@@ -1016,15 +960,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         default:
           return res.status(400).json({ error: 'Invalid action' });
       }
-      });
     }
 
     // ========================================
-    // PUT - Mettre à jour une manche (avec lock)
+    // PUT - Mettre à jour une manche
     // ========================================
     if (method === 'PUT') {
-      return await withLock(async () => {
-        const { roundId, updates } = req.body || {};
+      const { roundId, updates } = req.body || {};
         
         if (!roundId || !updates) {
           return res.status(400).json({ error: 'roundId and updates required' });
@@ -1048,7 +990,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await setGameState(gameState);
 
         return res.status(200).json({ success: true, round: gameState.rounds[roundIndex] });
-      });
     }
 
     // Method not allowed
