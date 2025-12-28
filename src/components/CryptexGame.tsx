@@ -498,7 +498,57 @@ export function CryptexGame() {
   }
 
   if (!round) {
-    return null;
+    // Afficher un écran de chargement au lieu d'un écran noir
+    return (
+      <div className="min-h-screen min-h-[100dvh] flex flex-col items-center justify-center p-6 bg-stone-texture relative overflow-hidden">
+        <div className="torch-glow absolute inset-0 pointer-events-none" />
+        
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center"
+        >
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+            className="w-20 h-20 mx-auto mb-6 rounded-full"
+            style={{
+              background: 'conic-gradient(from 0deg, #3d1f08, #8b4513, #d4af37, #8b4513, #3d1f08)',
+              boxShadow: '0 0 40px rgba(212, 175, 55, 0.3)',
+            }}
+          >
+            <div className="w-full h-full rounded-full flex items-center justify-center bg-stone-950/80">
+              <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
+            </div>
+          </motion.div>
+          
+          <h2 
+            className="font-display text-xl sm:text-2xl font-bold mb-2 tracking-wide"
+            style={{
+              background: 'linear-gradient(180deg, #f5ede0 0%, #d4af37 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}
+          >
+            Préparation des épreuves...
+          </h2>
+          <p className="text-amber-600/80 font-body mb-6">
+            Les rouages du cryptex s'activent
+          </p>
+          
+          <button
+            onClick={() => fetchGameState()}
+            className="px-5 py-2.5 rounded-lg font-display text-sm uppercase tracking-wider transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #8b6914 0%, #6b4f0f 100%)',
+              boxShadow: '0 4px 15px rgba(139, 105, 20, 0.3)',
+            }}
+          >
+            <span className="text-amber-100">Réessayer</span>
+          </button>
+        </motion.div>
+      </div>
+    );
   }
 
   return (
