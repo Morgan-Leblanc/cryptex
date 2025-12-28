@@ -2,7 +2,15 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
-const POLL_INTERVAL = 3000;
+const BASE_POLL_INTERVAL = 5000; // 5 secondes de base
+const MAX_POLL_INTERVAL = 30000; // Max 30 secondes
+const DEBOUNCE_DELAY = 500; // 500ms de debounce
+
+interface CachedState {
+  data: any;
+  timestamp: number;
+  version?: number;
+}
 
 export function useGameSync() {
   const { 
@@ -13,57 +21,131 @@ export function useGameSync() {
   } = useGameStore();
   
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cacheRef = useRef<CachedState | null>(null);
+  const errorCountRef = useRef(0);
+  const lastSuccessRef = useRef(Date.now());
 
-  const syncWithServer = useCallback(async () => {
+  // Debounced sync function
+  const syncWithServer = useCallback(async (immediate = false) => {
     if (!isAuthenticated || !user) return;
 
-    try {
-      const response = await fetch(API_BASE);
-      if (!response.ok) {
-        console.warn('Server returned error, keeping current state');
-        return;
-      }
-      
-      const data = await response.json();
-      
-      // Pour les joueurs : juste vérifier si le jeu est lancé
-      // PAS de déconnexion automatique - seul le bouton peut déconnecter
-      if (!isAdmin) {
-        if (data.isStarted) {
-          setWaitingForStart(false);
-        } else if (data.isActive) {
-          // Partie active mais pas encore lancée
-          setWaitingForStart(true);
+    // Debounce sauf si immédiat
+    if (!immediate && timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    const performSync = async () => {
+      try {
+        // Vérifier le cache d'abord
+        const now = Date.now();
+        if (cacheRef.current && !immediate) {
+          const cacheAge = now - cacheRef.current.timestamp;
+          // Si le cache a moins de 2 secondes, on l'utilise
+          if (cacheAge < 2000) {
+            const cachedData = cacheRef.current.data;
+            if (!isAdmin && cachedData) {
+              if (cachedData.isStarted) {
+                setWaitingForStart(false);
+              } else if (cachedData.isActive) {
+                setWaitingForStart(true);
+              }
+            }
+            return;
+          }
         }
-        // Si isActive est false, on ne fait rien - le joueur reste connecté
+
+        const response = await fetch(API_BASE);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Mettre en cache
+        cacheRef.current = {
+          data,
+          timestamp: Date.now(),
+        };
+        
+        // Reset error count on success
+        errorCountRef.current = 0;
+        lastSuccessRef.current = Date.now();
+        
+        // Pour les joueurs : juste vérifier si le jeu est lancé
+        if (!isAdmin) {
+          if (data.isStarted) {
+            setWaitingForStart(false);
+          } else if (data.isActive) {
+            setWaitingForStart(true);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to sync with server:', error);
+        errorCountRef.current++;
+        
+        // Exponential backoff : augmenter l'intervalle en cas d'erreurs
+        // Mais on garde quand même le cache pour l'UI
+        if (cacheRef.current) {
+          const cachedData = cacheRef.current.data;
+          if (!isAdmin && cachedData) {
+            if (cachedData.isStarted) {
+              setWaitingForStart(false);
+            } else if (cachedData.isActive) {
+              setWaitingForStart(true);
+            }
+          }
+        }
       }
-    } catch (error) {
-      console.error('Failed to sync with server:', error);
-      // Erreur réseau - on garde l'état actuel
+    };
+
+    if (immediate) {
+      await performSync();
+    } else {
+      timeoutRef.current = setTimeout(performSync, DEBOUNCE_DELAY);
     }
   }, [isAuthenticated, user, isAdmin, setWaitingForStart]);
+
+  // Calculer l'intervalle dynamique basé sur les erreurs
+  const getPollInterval = useCallback(() => {
+    const baseInterval = BASE_POLL_INTERVAL;
+    const errorMultiplier = Math.min(Math.pow(2, errorCountRef.current), 6); // Max 6x
+    const calculated = baseInterval * errorMultiplier;
+    return Math.min(calculated, MAX_POLL_INTERVAL);
+  }, []);
 
   // Initial sync on mount
   useEffect(() => {
     if (isAuthenticated && user && !isAdmin) {
-      syncWithServer();
+      syncWithServer(true); // Sync immédiat au mount
     }
   }, [isAuthenticated, user, isAdmin, syncWithServer]);
 
-  // Polling for all connected players (not just waiting)
+  // Polling adaptatif
   useEffect(() => {
     if (isAuthenticated && user && !isAdmin) {
-      intervalRef.current = setInterval(syncWithServer, POLL_INTERVAL);
+      const scheduleNext = () => {
+        const interval = getPollInterval();
+        intervalRef.current = setTimeout(() => {
+          syncWithServer();
+          scheduleNext();
+        }, interval);
+      };
+      
+      scheduleNext();
     }
 
     return () => {
       if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+        clearTimeout(intervalRef.current);
         intervalRef.current = null;
       }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
-  }, [isAuthenticated, user, isAdmin, syncWithServer]);
+  }, [isAuthenticated, user, isAdmin, syncWithServer, getPollInterval]);
 
   return { syncWithServer };
 }
-

@@ -88,12 +88,50 @@ export function AdminPanel() {
   // Garder trace si on a déjà vu une partie active (évite les rollbacks)
   const [hasSeenActiveGame, setHasSeenActiveGame] = useState(false);
 
-  // Fetch game state
-  const fetchGameState = useCallback(async () => {
+  // Cache local pour éviter les requêtes inutiles
+  const cacheRef = useRef<{ data: GameState | null; timestamp: number }>({ data: null, timestamp: 0 });
+  const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFetchingRef = useRef(false);
+
+  // Fetch game state avec cache et debouncing
+  const fetchGameState = useCallback(async (immediate = false) => {
+    // Éviter les requêtes simultanées
+    if (isFetchingRef.current && !immediate) {
+      return;
+    }
+
+    // Debounce sauf si immédiat
+    if (!immediate) {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+      debounceTimeoutRef.current = setTimeout(() => {
+        fetchGameState(true);
+      }, 300);
+      return;
+    }
+
+    // Vérifier le cache d'abord (max 2 secondes)
+    const now = Date.now();
+    if (cacheRef.current.data && (now - cacheRef.current.timestamp) < 2000) {
+      const cachedData = cacheRef.current.data;
+      if (cachedData.isActive) {
+        setHasSeenActiveGame(true);
+      }
+      setGameState(cachedData);
+      setIsLoading(false);
+      return;
+    }
+
+    isFetchingRef.current = true;
+
     try {
       const response = await fetch(`${API_BASE}?admin=true`);
       if (response.ok) {
         const data = await response.json();
+        
+        // Mettre en cache
+        cacheRef.current = { data, timestamp: Date.now() };
         
         // Si la partie est active, marquer qu'on l'a vue
         if (data.isActive) {
@@ -107,8 +145,10 @@ export function AdminPanel() {
             setHasSeenActiveGame(false);
             setGameState(data);
           } else {
-            // Probablement une erreur de sync, garder l'ancien état
-            console.warn('Ignoring inactive state - likely sync error');
+            // Probablement une erreur de sync, garder l'ancien état du cache
+            if (cacheRef.current.data) {
+              console.warn('Ignoring inactive state - likely sync error, keeping cached state');
+            }
           }
         } else {
           // Pas de partie active et on n'en a jamais vu
@@ -117,17 +157,31 @@ export function AdminPanel() {
       }
     } catch (error) {
       console.error('Failed to fetch game state:', error);
-      // En cas d'erreur, ne pas modifier l'état
+      // En cas d'erreur, utiliser le cache si disponible
+      if (cacheRef.current.data) {
+        setGameState(cacheRef.current.data);
+      }
     } finally {
       setIsLoading(false);
+      isFetchingRef.current = false;
     }
   }, [hasSeenActiveGame]);
 
-  // Poll for updates
+  // Poll for updates avec intervalle adaptatif
   useEffect(() => {
-    fetchGameState();
-    const interval = setInterval(fetchGameState, POLL_INTERVAL);
-    return () => clearInterval(interval);
+    fetchGameState(true); // Premier fetch immédiat
+    
+    // Intervalle plus long pour l'admin (5 secondes)
+    const interval = setInterval(() => {
+      fetchGameState();
+    }, 5000);
+    
+    return () => {
+      clearInterval(interval);
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
   }, [fetchGameState]);
 
   const handleEditRound = (round: RoundConfig) => {
@@ -150,7 +204,7 @@ export function AdminPanel() {
         body: JSON.stringify({ roundId }),
       });
       if (response.ok) {
-        await fetchGameState();
+        invalidateAndRefresh();
       }
     } catch (error) {
       console.error('Failed to reveal hint:', error);
@@ -191,6 +245,12 @@ export function AdminPanel() {
     setEditForm({});
   };
 
+  // Helper pour invalider le cache et rafraîchir
+  const invalidateAndRefresh = useCallback(() => {
+    cacheRef.current = { data: null, timestamp: 0 };
+    fetchGameState(true);
+  }, [fetchGameState]);
+
   const handleStartGame = async () => {
     setActionLoading('start');
     try {
@@ -198,7 +258,7 @@ export function AdminPanel() {
         method: 'POST',
       });
       if (response.ok) {
-        await fetchGameState();
+        invalidateAndRefresh();
       }
     } catch (error) {
       console.error('Failed to start game:', error);
@@ -214,7 +274,7 @@ export function AdminPanel() {
         method: 'POST',
       });
       if (response.ok) {
-        await fetchGameState();
+        invalidateAndRefresh();
       }
     } catch (error) {
       console.error('Failed to stop game:', error);
@@ -255,7 +315,7 @@ export function AdminPanel() {
         body: JSON.stringify({ mode }),
       });
       if (response.ok) {
-        await fetchGameState();
+        invalidateAndRefresh();
       }
     } catch (error) {
       console.error('Failed to set mode:', error);
@@ -271,7 +331,7 @@ export function AdminPanel() {
         method: 'POST',
       });
       if (response.ok) {
-        await fetchGameState();
+        invalidateAndRefresh();
       }
     } catch (error) {
       console.error('Failed to launch round:', error);
@@ -287,7 +347,7 @@ export function AdminPanel() {
         method: 'POST',
       });
       if (response.ok) {
-        await fetchGameState();
+        invalidateAndRefresh();
       }
     } catch (error) {
       console.error('Failed to end round:', error);
@@ -314,7 +374,7 @@ export function AdminPanel() {
     if (result.error) {
       setCreateError(result.message || 'Erreur lors de la création');
     } else {
-      await fetchGameState();
+      invalidateAndRefresh();
     }
     
     setActionLoading(null);

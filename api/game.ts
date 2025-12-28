@@ -48,13 +48,25 @@ async function getDb(): Promise<Db> {
   return cachedDb;
 }
 
+// Versioning pour détecter les conflits
+interface VersionedData<T> {
+  data: T;
+  version: number;
+  updatedAt: Date;
+}
+
 async function kvGet<T>(key: string): Promise<T | null> {
   try {
     const db = await getDb();
-    const doc = await db.collection('gameState').findOne({ _id: key as any });
-    const data = doc ? (doc.data as T) : null;
+    const doc = await db.collection('gameState').findOne<VersionedData<T>>({ _id: key as any });
     
-    // Mettre en cache local
+    if (!doc) {
+      return null;
+    }
+    
+    const data = doc.data;
+    
+    // Mettre en cache local avec version
     if (key === 'cryptex:gameState' && data) {
       localCache.gameState = data as GameState;
     } else if (key === 'cryptex:players' && data) {
@@ -78,24 +90,47 @@ async function kvGet<T>(key: string): Promise<T | null> {
   }
 }
 
-async function kvSet(key: string, value: unknown): Promise<void> {
-  // Toujours mettre à jour le cache local d'abord
-  if (key === 'cryptex:gameState') {
-    localCache.gameState = value as GameState;
-  } else if (key === 'cryptex:players') {
-    localCache.players = value as Record<string, Player>;
-  }
-  
+async function kvSet(key: string, value: unknown, expectedVersion?: number): Promise<{ success: boolean; version: number }> {
   try {
     const db = await getDb();
-    await db.collection('gameState').updateOne(
+    const now = new Date();
+    
+    // Lire la version actuelle
+    const current = await db.collection('gameState').findOne<VersionedData<unknown>>({ _id: key as any });
+    const currentVersion = current?.version || 0;
+    
+    // Si une version est attendue, vérifier qu'elle correspond (optimistic locking)
+    if (expectedVersion !== undefined && currentVersion !== expectedVersion) {
+      console.warn(`Version mismatch for ${key}: expected ${expectedVersion}, got ${currentVersion}`);
+      return { success: false, version: currentVersion };
+    }
+    
+    const newVersion = currentVersion + 1;
+    
+    // Mettre à jour avec versioning
+    const result = await db.collection('gameState').updateOne(
       { _id: key as any },
-      { $set: { data: value, updatedAt: new Date() } },
+      { 
+        $set: { 
+          data: value, 
+          version: newVersion,
+          updatedAt: now 
+        } 
+      },
       { upsert: true }
     );
+    
+    // Mettre à jour le cache local
+    if (key === 'cryptex:gameState') {
+      localCache.gameState = value as GameState;
+    } else if (key === 'cryptex:players') {
+      localCache.players = value as Record<string, Player>;
+    }
+    
+    return { success: true, version: newVersion };
   } catch (error) {
     console.error('MongoDB SET error:', error);
-    // Les données sont au moins dans le cache local
+    return { success: false, version: 0 };
   }
 }
 
@@ -198,8 +233,9 @@ async function getGameState(): Promise<GameState> {
   return state;
 }
 
-async function setGameState(state: GameState): Promise<void> {
-  await kvSet(GAME_STATE_KEY, state);
+async function setGameState(state: GameState, expectedVersion?: number): Promise<boolean> {
+  const result = await kvSet(GAME_STATE_KEY, state, expectedVersion);
+  return result.success;
 }
 
 async function getPlayers(): Promise<Record<string, Player>> {
@@ -207,8 +243,9 @@ async function getPlayers(): Promise<Record<string, Player>> {
   return players || {};
 }
 
-async function setPlayers(players: Record<string, Player>): Promise<void> {
-  await kvSet(PLAYERS_KEY, players);
+async function setPlayers(players: Record<string, Player>, expectedVersion?: number): Promise<boolean> {
+  const result = await kvSet(PLAYERS_KEY, players, expectedVersion);
+  return result.success;
 }
 
 function createDefaultGameState(): GameState {
@@ -290,6 +327,35 @@ function getRoundWinners(players: Record<string, Player>, gameState: GameState) 
       time: player ? player.roundTimes[roundIndex] : 0,
     };
   }).sort((a, b) => a.time - b.time);
+}
+
+// ============================================
+// MUTEX pour éviter les race conditions
+// ============================================
+let operationLock: Promise<void> | null = null;
+
+async function withLock<T>(operation: () => Promise<T>): Promise<T> {
+  // Attendre que l'opération précédente se termine
+  if (operationLock) {
+    await operationLock;
+  }
+  
+  // Créer un nouveau lock
+  let resolveLock: () => void;
+  operationLock = new Promise(resolve => {
+    resolveLock = resolve;
+  });
+  
+  try {
+    const result = await operation();
+    return result;
+  } finally {
+    // Libérer le lock
+    if (operationLock) {
+      operationLock = null;
+    }
+    resolveLock!();
+  }
 }
 
 // ============================================
@@ -392,12 +458,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ========================================
-    // POST - Actions
+    // POST - Actions (avec lock pour éviter race conditions)
     // ========================================
     if (method === 'POST') {
-      const body = req.body || {};
-      let gameState = await getGameState();
-      let players = await getPlayers();
+      return await withLock(async () => {
+        const body = req.body || {};
+        let gameState = await getGameState();
+        let players = await getPlayers();
 
       switch (action) {
         // Mode de jeu
@@ -895,19 +962,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         default:
           return res.status(400).json({ error: 'Invalid action' });
       }
+      });
     }
 
     // ========================================
-    // PUT - Mettre à jour une manche
+    // PUT - Mettre à jour une manche (avec lock)
     // ========================================
     if (method === 'PUT') {
-      const { roundId, updates } = req.body || {};
-      
-      if (!roundId || !updates) {
-        return res.status(400).json({ error: 'roundId and updates required' });
-      }
+      return await withLock(async () => {
+        const { roundId, updates } = req.body || {};
+        
+        if (!roundId || !updates) {
+          return res.status(400).json({ error: 'roundId and updates required' });
+        }
 
-      const gameState = await getGameState();
+        const gameState = await getGameState();
       const roundIndex = gameState.rounds.findIndex(r => r.id === roundId);
       if (roundIndex === -1) {
         return res.status(404).json({ error: 'Round not found' });
@@ -922,9 +991,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ...updates,
       };
 
-      await setGameState(gameState);
+        await setGameState(gameState);
 
-      return res.status(200).json({ success: true, round: gameState.rounds[roundIndex] });
+        return res.status(200).json({ success: true, round: gameState.rounds[roundIndex] });
+      });
     }
 
     // Method not allowed
