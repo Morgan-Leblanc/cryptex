@@ -143,17 +143,11 @@ export function AdminPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roundId }),
       });
-      const data = await response.json();
       if (response.ok) {
-        console.log('✅ Hint revealed:', data);
         invalidateAndRefresh();
-      } else {
-        console.error('❌ Reveal hint failed:', data);
-        alert(`Erreur: ${data.error || 'Échec révélation indice'}`);
       }
     } catch (error) {
       console.error('Failed to reveal hint:', error);
-      alert('Erreur réseau lors de la révélation de l\'indice');
     } finally {
       setActionLoading(null);
     }
@@ -282,19 +276,12 @@ export function AdminPanel() {
     try {
       const response = await fetch(`${API_BASE}?action=launch-round`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
       });
-      const data = await response.json();
       if (response.ok) {
-        console.log('✅ Round launched:', data);
         invalidateAndRefresh();
-      } else {
-        console.error('❌ Launch round failed:', data);
-        alert(`Erreur: ${data.error || 'Échec lancement manche'}`);
       }
     } catch (error) {
       console.error('Failed to launch round:', error);
-      alert('Erreur réseau lors du lancement de la manche');
     } finally {
       setActionLoading(null);
     }
@@ -305,19 +292,12 @@ export function AdminPanel() {
     try {
       const response = await fetch(`${API_BASE}?action=end-round`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
       });
-      const data = await response.json();
       if (response.ok) {
-        console.log('✅ Round ended:', data);
         invalidateAndRefresh();
-      } else {
-        console.error('❌ End round failed:', data);
-        alert(`Erreur: ${data.error || 'Échec fin de manche'}`);
       }
     } catch (error) {
       console.error('Failed to end round:', error);
-      alert('Erreur réseau lors de la fin de manche');
     } finally {
       setActionLoading(null);
     }

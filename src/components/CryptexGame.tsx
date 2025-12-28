@@ -59,14 +59,27 @@ export function CryptexGame() {
       if (response.ok) {
         const data = await response.json();
         
-        // Ne mettre à jour les rounds que s'ils ont changé (par ID)
+        // Mettre à jour les rounds avec les indices révélés
         const newRounds = data.rounds || [];
+        const revealedHints = data.revealedHints || [];
+        
+        // Enrichir les rounds avec le nombre d'indices révélés
+        const enrichedRounds = newRounds.map((r: RoundConfig, i: number) => ({
+          ...r,
+          revealedHints: revealedHints[i] || 0,
+        }));
+        
         setRounds(prevRounds => {
-          // Comparer par ID pour éviter les réinitialisations inutiles
-          if (prevRounds.length === 0 || 
-              prevRounds.length !== newRounds.length ||
-              prevRounds.some((r, i) => r.id !== newRounds[i]?.id)) {
-            return newRounds;
+          // Comparer les rounds: ID + indices révélés
+          const hasChanged = prevRounds.length === 0 || 
+              prevRounds.length !== enrichedRounds.length ||
+              prevRounds.some((r, i) => 
+                r.id !== enrichedRounds[i]?.id || 
+                r.revealedHints !== enrichedRounds[i]?.revealedHints
+              );
+          
+          if (hasChanged) {
+            return enrichedRounds;
           }
           return prevRounds; // Garder les anciens si identiques
         });
@@ -170,11 +183,15 @@ export function CryptexGame() {
     }
   }, [session, user, accessCode, checkReconnect, isRestoring]);
 
-  // Polling en mode contrôlé: détecter le lancement de manche ou passage à la suivante
+  // Polling en mode contrôlé: détecter les changements (indices, manches, etc.)
   // Ce useEffect est TOUJOURS appelé (pas conditionnel) mais le polling est activé conditionnellement
   useEffect(() => {
-    const needsPolling = gameInfo.gameMode === 'controlled' && 
-      ((!gameInfo.roundActive || gameInfo.currentRound === 0) || hasFoundCurrentRound);
+    // En mode contrôlé, on poll toujours pour détecter:
+    // - Le lancement d'une manche
+    // - La révélation d'un indice
+    // - Le passage à la manche suivante
+    // - La fin de partie
+    const needsPolling = gameInfo.gameMode === 'controlled';
     
     if (!needsPolling) return;
     
@@ -183,7 +200,7 @@ export function CryptexGame() {
     }, 3000);
     
     return () => clearInterval(interval);
-  }, [gameInfo.gameMode, gameInfo.roundActive, gameInfo.currentRound, hasFoundCurrentRound, fetchGameState]);
+  }, [gameInfo.gameMode, fetchGameState]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
