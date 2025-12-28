@@ -20,7 +20,6 @@ import {
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
-const POLL_INTERVAL = 2000;
 
 interface RoundConfig {
   id: number;
@@ -69,7 +68,7 @@ interface GameState {
 }
 
 export function AdminPanel() {
-  const { logout, createGame, endGame, accessCode: storedAccessCode } = useGameStore();
+  const { logout, createGame, endGame, clearGameData } = useGameStore();
   
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -86,49 +85,21 @@ export function AdminPanel() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   // Fetch game state - SIMPLE, pas de cache complexe
+  // Le serveur est la SOURCE DE VÉRITÉ unique
   const fetchGameState = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}?admin=true`);
       if (response.ok) {
         const data = await response.json();
-        
-        // Si on a un accessCode stocké, s'assurer qu'il est présent dans les données
-        if (storedAccessCode && !data.accessCode) {
-          data.accessCode = storedAccessCode;
-          data.isActive = true;
-        }
-        
-        // PRÉSERVER les players existants si les nouvelles données n'en ont pas ou sont vides
-        setGameState(prevState => {
-          // Toujours utiliser les nouvelles données du serveur (source de vérité)
-          // Mais si les nouvelles données n'ont pas de players et qu'on en avait avant,
-          // c'est probablement une erreur de sync - on garde les anciens temporairement
-          const newHasPlayers = data.connectedPlayers && data.connectedPlayers.length > 0;
-          const prevHasPlayers = prevState?.connectedPlayers && prevState.connectedPlayers.length > 0;
-          
-          if (newHasPlayers) {
-            // Nouvelles données ont des players → utiliser les nouvelles (source de vérité)
-            return data;
-          } else if (prevHasPlayers && !newHasPlayers) {
-            // Pas de players dans les nouvelles données mais on en avait avant
-            // C'est probablement une erreur temporaire → garder les anciens
-            console.warn('No players in new data, keeping previous players');
-            return {
-              ...data,
-              connectedPlayers: prevState.connectedPlayers,
-              leaderboard: prevState.leaderboard || data.leaderboard,
-            };
-          }
-          // Pas de players du tout → utiliser les nouvelles données
-          return data;
-        });
+        // Utiliser directement les données du serveur - pas de modification locale
+        setGameState(data);
       }
     } catch (error) {
       console.error('Failed to fetch game state:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [storedAccessCode]);
+  }, []);
 
   // Fetch initial seulement + quand la fenêtre redevient visible
   // Utiliser useRef pour éviter les re-renders dus aux dépendances
@@ -264,8 +235,13 @@ export function AdminPanel() {
         method: 'POST',
       });
       if (response.ok) {
-        await fetchGameState();
+        // IMPORTANT: Nettoyer le store local AVANT de fetch le nouvel état
+        clearGameData();
         setConfirmReset(false);
+        // Forcer un reset de l'état local
+        setGameState(null);
+        // Puis fetch le nouvel état
+        await fetchGameState();
       }
     } catch (error) {
       console.error('Failed to reset game:', error);
@@ -385,42 +361,12 @@ export function AdminPanel() {
     );
   }
 
-  // PROTECTION : S'assurer que gameState a toujours isActive=true si on a un accessCode
-  // MAIS dans un useEffect pour éviter les re-renders infinis
-  useEffect(() => {
-    if (storedAccessCode && gameState) {
-      // Si on a un accessCode mais gameState.isActive est false, corriger
-      if (!gameState.isActive || gameState.accessCode !== storedAccessCode) {
-        setGameState({ 
-          ...gameState, 
-          isActive: true, 
-          accessCode: storedAccessCode 
-        });
-      }
-    } else if (storedAccessCode && !gameState) {
-      // Créer un état minimal si gameState est null mais on a un accessCode
-      const minimalState: GameState = {
-        id: 'temp',
-        rounds: [],
-        isStarted: false,
-        startedAt: null,
-        createdAt: new Date().toISOString(),
-        connectedPlayers: [],
-        gameMode: 'free',
-        currentRound: 0,
-        roundActive: false,
-        isActive: true,
-        accessCode: storedAccessCode,
-      };
-      setGameState(minimalState);
-    }
-  }, [storedAccessCode, gameState?.isActive, gameState?.accessCode]);
+  // Pas de "protection" qui force l'état - on fait confiance au serveur
+  // Si gameState est null après le chargement, on montre l'écran de création
 
-  // Écran de création UNIQUEMENT si :
-  // - Pas de code stocké (storedAccessCode est null/undefined)
-  // - ET pas de partie active dans MongoDB
-  // Si storedAccessCode existe, on NE PEUT PAS arriver ici grâce à la protection ci-dessus
-  const shouldShowCreateScreen = !storedAccessCode && gameState && !gameState.isActive;
+  // Écran de création si pas de partie active sur le serveur
+  // On se base uniquement sur gameState.accessCode (source de vérité = serveur)
+  const shouldShowCreateScreen = gameState && !gameState.accessCode;
   
   if (shouldShowCreateScreen) {
     return (
@@ -527,6 +473,28 @@ export function AdminPanel() {
             <LogOut className="w-4 h-4" />
             Déconnexion
           </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Guard : si gameState est null à ce point, afficher le loader
+  if (!gameState) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-stone-texture">
+        <div className="torch-glow absolute inset-0 pointer-events-none" />
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+          className="w-16 h-16 rounded-full"
+          style={{
+            background: 'conic-gradient(from 0deg, #3d1f08, #8b4513, #d4af37, #8b4513, #3d1f08)',
+            boxShadow: '0 0 30px rgba(212, 175, 55, 0.3)',
+          }}
+        >
+          <div className="w-full h-full rounded-full flex items-center justify-center bg-stone-950/80">
+            <Loader2 className="w-6 h-6 text-amber-500 animate-spin" />
+          </div>
         </motion.div>
       </div>
     );

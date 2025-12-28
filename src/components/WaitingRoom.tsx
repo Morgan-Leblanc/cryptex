@@ -3,7 +3,6 @@ import { RefreshCw } from 'lucide-react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
-const POLL_INTERVAL = 2000; // 2 secondes
 
 interface PlayerInfo {
   username: string;

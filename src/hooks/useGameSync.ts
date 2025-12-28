@@ -10,10 +10,21 @@ export function useGameSync() {
     isAdmin, 
     isWaitingForStart,
     setWaitingForStart,
+    accessCode: storedAccessCode,
+    forceLogout,
   } = useGameStore();
   
   const lastIsStartedRef = useRef<boolean | null>(null);
+  const lastAccessCodeRef = useRef<string | null>(null);
+  const lastResetAtRef = useRef<string | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
+
+  // Initialiser les refs avec les valeurs actuelles
+  useEffect(() => {
+    if (storedAccessCode) {
+      lastAccessCodeRef.current = storedAccessCode;
+    }
+  }, [storedAccessCode]);
 
   useEffect(() => {
     if (!isAuthenticated || !user || isAdmin || !isWaitingForStart) return;
@@ -21,14 +32,37 @@ export function useGameSync() {
     const handleGameStateEvent = (event: MessageEvent) => {
       try {
         const payload = JSON.parse(event.data);
-        const currentIsStarted = payload?.gameState?.isStarted ?? false;
+        const gameState = payload?.gameState;
+        
+        if (!gameState) return;
 
+        const currentIsStarted = gameState.isStarted ?? false;
+        const currentAccessCode = gameState.accessCode ?? null;
+        const currentResetAt = gameState.resetAt ?? null;
+
+        // DÉTECTION DE RESET : Si resetAt a changé, forcer la déconnexion
+        if (currentResetAt && currentResetAt !== lastResetAtRef.current && lastResetAtRef.current !== null) {
+          console.log('🔄 Game was reset, forcing logout');
+          forceLogout();
+          return;
+        }
+        lastResetAtRef.current = currentResetAt;
+
+        // DÉTECTION DE PARTIE SUPPRIMÉE : Si accessCode devient null alors qu'on en avait un
+        if (lastAccessCodeRef.current && !currentAccessCode) {
+          console.log('🔄 Game ended (accessCode removed), forcing logout');
+          forceLogout();
+          return;
+        }
+        lastAccessCodeRef.current = currentAccessCode;
+
+        // Gestion normale du démarrage de partie
         if (currentIsStarted !== lastIsStartedRef.current) {
           lastIsStartedRef.current = currentIsStarted;
 
           if (currentIsStarted) {
             setWaitingForStart(false);
-          } else if (payload?.gameState?.accessCode) {
+          } else if (currentAccessCode) {
             setWaitingForStart(true);
           }
         }
@@ -51,7 +85,7 @@ export function useGameSync() {
       source.close();
       sourceRef.current = null;
     };
-  }, [isAuthenticated, isAdmin, isWaitingForStart, setWaitingForStart, user]);
+  }, [isAuthenticated, isAdmin, isWaitingForStart, setWaitingForStart, user, forceLogout]);
 
   return {
     refresh: async () => {
@@ -59,6 +93,23 @@ export function useGameSync() {
       const response = await fetch(API_BASE);
       if (response.ok) {
         const data = await response.json();
+        
+        // Vérifier si la partie a été reset
+        if (data.resetAt && data.resetAt !== lastResetAtRef.current && lastResetAtRef.current !== null) {
+          console.log('🔄 Game was reset (via refresh), forcing logout');
+          forceLogout();
+          return;
+        }
+        lastResetAtRef.current = data.resetAt;
+        
+        // Vérifier si la partie a été supprimée
+        if (lastAccessCodeRef.current && !data.accessCode) {
+          console.log('🔄 Game ended (via refresh), forcing logout');
+          forceLogout();
+          return;
+        }
+        lastAccessCodeRef.current = data.accessCode;
+
         const currentIsStarted = data.isStarted || false;
         if (currentIsStarted !== lastIsStartedRef.current) {
           lastIsStartedRef.current = currentIsStarted;

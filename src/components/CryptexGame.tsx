@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Trophy,
@@ -669,28 +669,28 @@ export function CryptexGame() {
               style={{
                 background: i === currentRoundIndex
                   ? 'linear-gradient(135deg, #d4af37 0%, #8b6914 100%)'
-                  : session.roundsCompleted[i]
+                  : session?.roundsCompleted[i]
                     ? 'linear-gradient(135deg, #166534 0%, #052e16 100%)'
                     : 'linear-gradient(135deg, #2a2418 0%, #1a1612 100%)',
                 border: '2px solid',
                 borderColor: i === currentRoundIndex
                   ? '#d4af37'
-                  : session.roundsCompleted[i]
+                  : session?.roundsCompleted[i]
                     ? '#22c55e'
                     : '#3d2e1f',
                 boxShadow: i === currentRoundIndex
                   ? '0 0 15px rgba(212, 175, 55, 0.4)'
-                  : session.roundsCompleted[i]
+                  : session?.roundsCompleted[i]
                     ? '0 0 10px rgba(34, 197, 94, 0.3)'
                     : 'none',
                 color: i === currentRoundIndex
                   ? '#1a1612'
-                  : session.roundsCompleted[i]
+                  : session?.roundsCompleted[i]
                     ? '#4ade80'
                     : '#5c4d3d',
               }}
             >
-              {session.roundsCompleted[i] ? '✓' : i + 1}
+              {session?.roundsCompleted[i] ? '✓' : i + 1}
             </motion.div>
           ))}
         </div>

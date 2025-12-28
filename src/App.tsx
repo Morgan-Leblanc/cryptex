@@ -11,7 +11,7 @@ import { useGameSync } from './hooks/useGameSync';
 import { Loader2 } from 'lucide-react';
 
 function App() {
-  const { view, isAuthenticated, session, isAdmin, isWaitingForStart, user, accessCode, checkReconnect } = useGameStore();
+  const { isAuthenticated, session, isAdmin, isWaitingForStart, user, accessCode, checkReconnect } = useGameStore();
   const [isHydrated, setIsHydrated] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   

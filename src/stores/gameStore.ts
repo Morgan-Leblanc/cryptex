@@ -32,6 +32,8 @@ interface GameState {
   resetGame: () => void;
   setWaitingForStart: (waiting: boolean) => void;
   endGame: () => Promise<void>;
+  clearGameData: () => void;
+  forceLogout: () => void;
 }
 
 const ADMIN_USERNAME = 'admin2026';
@@ -479,6 +481,29 @@ export const useGameStore = create<GameState>()(
       },
 
       setWaitingForStart: (waiting) => set({ isWaitingForStart: waiting }),
+
+      // Nettoyer les données de jeu (après un reset admin)
+      clearGameData: () => {
+        set({
+          gameId: null,
+          accessCode: null,
+        });
+      },
+
+      // Forcer la déconnexion (pour les joueurs quand la partie est reset)
+      forceLogout: () => {
+        set({
+          view: 'code',
+          isAuthenticated: false,
+          user: null,
+          session: null,
+          isAdmin: false,
+          gameId: null,
+          accessCode: null,
+          isWaitingForStart: false,
+          adminSessionId: null,
+        });
+      },
     }),
     {
       name: 'cryptex-game-storage',
