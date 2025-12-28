@@ -1,21 +1,54 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { join } from 'path';
 
 // ============================================
-// VERCEL KV - avec fallback en mémoire si non configuré
+// STORAGE - Vercel KV avec fallback fichier /tmp
 // ============================================
 let kvClient: typeof import('@vercel/kv').kv | null = null;
-let useMemoryFallback = false;
+let useFileFallback = false;
+let kvInitialized = false;
 
-// Fallback en mémoire (pour dev local ou si KV non configuré)
-const memoryStore: Record<string, unknown> = {};
+// Chemin du fichier de fallback (dans /tmp sur Vercel)
+const FALLBACK_FILE = join('/tmp', 'cryptex-game-state.json');
+
+// Cache en mémoire pour le fallback fichier
+let fileCache: Record<string, unknown> = {};
+let fileCacheLoaded = false;
+
+function loadFileCache(): void {
+  if (fileCacheLoaded) return;
+  
+  try {
+    if (existsSync(FALLBACK_FILE)) {
+      const data = readFileSync(FALLBACK_FILE, 'utf-8');
+      fileCache = JSON.parse(data);
+      console.log('📂 Loaded state from /tmp file');
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not read fallback file:', error);
+    fileCache = {};
+  }
+  fileCacheLoaded = true;
+}
+
+function saveFileCache(): void {
+  try {
+    writeFileSync(FALLBACK_FILE, JSON.stringify(fileCache), 'utf-8');
+  } catch (error) {
+    console.warn('⚠️ Could not write fallback file:', error);
+  }
+}
 
 async function initKV() {
-  if (kvClient !== null || useMemoryFallback) return;
+  if (kvInitialized) return;
+  kvInitialized = true;
   
   // Vérifier si les variables KV sont présentes
   if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
-    console.warn('⚠️ Vercel KV not configured - using in-memory fallback');
-    useMemoryFallback = true;
+    console.warn('⚠️ Vercel KV not configured - using /tmp file fallback');
+    useFileFallback = true;
+    loadFileCache();
     return;
   }
   
@@ -25,22 +58,26 @@ async function initKV() {
     console.log('✅ Vercel KV initialized');
   } catch (error) {
     console.error('❌ Failed to initialize KV:', error);
-    useMemoryFallback = true;
+    useFileFallback = true;
+    loadFileCache();
   }
 }
 
 async function kvGet<T>(key: string): Promise<T | null> {
   await initKV();
-  if (useMemoryFallback) {
-    return (memoryStore[key] as T) || null;
+  if (useFileFallback) {
+    loadFileCache();
+    return (fileCache[key] as T) || null;
   }
   return kvClient!.get<T>(key);
 }
 
 async function kvSet(key: string, value: unknown): Promise<void> {
   await initKV();
-  if (useMemoryFallback) {
-    memoryStore[key] = value;
+  if (useFileFallback) {
+    loadFileCache();
+    fileCache[key] = value;
+    saveFileCache();
     return;
   }
   await kvClient!.set(key, value);
