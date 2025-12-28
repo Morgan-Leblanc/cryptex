@@ -123,77 +123,63 @@ export const useGameStore = create<GameState>()(
       },
 
       // Vérifier si le joueur peut se reconnecter
+      // JAMAIS de déconnexion automatique - on essaie juste de resync avec le serveur
       checkReconnect: async () => {
         const { user, isAdmin, session } = get();
         
         if (!user || isAdmin) return false;
         
         try {
+          // D'abord essayer de reconnecter
           const response = await fetch(`${API_BASE}?action=reconnect`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: user.username }),
           });
           
-          if (!response.ok) {
-            // Le serveur ne reconnaît pas le joueur, mais on peut avoir un problème de cold start
-            // On garde l'état local si on a une session valide
-            if (session && session.username) {
-              console.warn('Server did not recognize player, keeping local session');
-              // Essayer de re-rejoindre la partie
-              try {
-                const rejoinResponse = await fetch(`${API_BASE}?action=join`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ username: user.username, avatar: user.avatar }),
-                });
-                
-                if (rejoinResponse.ok) {
-                  const rejoinData = await rejoinResponse.json();
-                  set({
-                    isAuthenticated: true,
-                    isWaitingForStart: !rejoinData.game?.isStarted,
-                    view: 'game',
-                  });
-                  return true;
-                }
-              } catch (rejoinError) {
-                console.error('Failed to rejoin:', rejoinError);
-              }
+          if (response.ok) {
+            const data = await response.json();
+            if (data.reconnect) {
+              set({
+                isAuthenticated: true,
+                gameId: data.game.id,
+                accessCode: data.game.accessCode,
+                isWaitingForStart: !data.game.isStarted,
+                view: 'game',
+              });
+              return true;
             }
+          }
+          
+          // Si le serveur ne reconnaît pas le joueur, essayer de rejoindre
+          if (session && session.username) {
+            const rejoinResponse = await fetch(`${API_BASE}?action=join`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: user.username, avatar: user.avatar }),
+            });
             
-            // Si vraiment rien ne marche, on déconnecte
-            set({
-              view: 'code',
-              isAuthenticated: false,
-              user: null,
-              session: null,
-              gameId: null,
-              accessCode: null,
-              isWaitingForStart: false,
-            });
-            return false;
+            if (rejoinResponse.ok) {
+              const rejoinData = await rejoinResponse.json();
+              set({
+                isAuthenticated: true,
+                isWaitingForStart: !rejoinData.game?.isStarted,
+                view: 'game',
+              });
+              return true;
+            }
           }
           
-          const data = await response.json();
+          // Même si rien ne marche côté serveur, on garde l'état local
+          // Le joueur reste connecté - seul le bouton peut déconnecter
+          set({ view: 'game' });
+          return true;
           
-          if (data.reconnect) {
-            // Mettre à jour avec les données du serveur
-            set({
-              isAuthenticated: true,
-              gameId: data.game.id,
-              accessCode: data.game.accessCode,
-              isWaitingForStart: !data.game.isStarted,
-              view: 'game',
-            });
-            return true;
-          }
-          
-          return false;
         } catch (error) {
           console.error('Failed to check reconnect:', error);
-          // En cas d'erreur réseau, on garde l'état actuel
-          return false;
+          // Erreur réseau - on garde l'état actuel, pas de déconnexion
+          set({ view: 'game' });
+          return true;
         }
       },
 

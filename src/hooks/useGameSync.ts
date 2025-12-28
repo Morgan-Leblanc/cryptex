@@ -2,7 +2,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
-const POLL_INTERVAL = 3000; // Augmenté à 3s pour réduire la charge
+const POLL_INTERVAL = 3000;
 
 export function useGameSync() {
   const { 
@@ -10,13 +10,9 @@ export function useGameSync() {
     user, 
     isAdmin, 
     setWaitingForStart,
-    logout,
-    session
   } = useGameStore();
   
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastKnownResetRef = useRef<string | null>(null);
-  const consecutiveInactiveCount = useRef(0); // Compteur pour éviter les faux positifs
 
   const syncWithServer = useCallback(async () => {
     if (!isAuthenticated || !user) return;
@@ -24,60 +20,28 @@ export function useGameSync() {
     try {
       const response = await fetch(API_BASE);
       if (!response.ok) {
-        // Erreur serveur, on ne fait rien (le serveur peut être temporairement indisponible)
         console.warn('Server returned error, keeping current state');
         return;
       }
       
       const data = await response.json();
       
-      // Check if game is still active - avec tolérance aux erreurs
-      if (!isAdmin && !data.isActive) {
-        consecutiveInactiveCount.current++;
-        
-        // Ne déconnecter qu'après 3 réponses consécutives "inactive"
-        // Cela évite les déconnexions dues à des cold starts temporaires
-        if (consecutiveInactiveCount.current >= 3) {
-          console.log('Game is no longer active (confirmed), logging out...');
-          await logout();
-          return;
-        } else {
-          console.warn(`Game inactive (${consecutiveInactiveCount.current}/3), waiting for confirmation...`);
-          return;
-        }
-      } else {
-        // Reset le compteur si la partie est active
-        consecutiveInactiveCount.current = 0;
-      }
-
-      // Check if game was reset - force logout for all players
-      if (!isAdmin && data.resetAt) {
-        // Initialize lastKnownReset on first sync
-        if (lastKnownResetRef.current === null) {
-          lastKnownResetRef.current = data.resetAt;
-        } else if (data.resetAt !== lastKnownResetRef.current) {
-          // Reset happened! Force logout
-          console.log('Game was reset by admin, logging out...');
-          await logout();
-          return;
-        }
-      }
-      
-      // For non-admin users, check if game is started
+      // Pour les joueurs : juste vérifier si le jeu est lancé
+      // PAS de déconnexion automatique - seul le bouton peut déconnecter
       if (!isAdmin) {
         if (data.isStarted) {
-          // Game is started, player can play
           setWaitingForStart(false);
-        } else {
-          // Game not started, player should wait
+        } else if (data.isActive) {
+          // Partie active mais pas encore lancée
           setWaitingForStart(true);
         }
+        // Si isActive est false, on ne fait rien - le joueur reste connecté
       }
     } catch (error) {
       console.error('Failed to sync with server:', error);
-      // On ne déconnecte pas en cas d'erreur réseau
+      // Erreur réseau - on garde l'état actuel
     }
-  }, [isAuthenticated, user, isAdmin, setWaitingForStart, logout]);
+  }, [isAuthenticated, user, isAdmin, setWaitingForStart]);
 
   // Initial sync on mount
   useEffect(() => {
@@ -85,13 +49,6 @@ export function useGameSync() {
       syncWithServer();
     }
   }, [isAuthenticated, user, isAdmin, syncWithServer]);
-
-  // Reset the lastKnownReset when user logs out
-  useEffect(() => {
-    if (!session) {
-      lastKnownResetRef.current = null;
-    }
-  }, [session]);
 
   // Polling for all connected players (not just waiting)
   useEffect(() => {
