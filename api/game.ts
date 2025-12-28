@@ -1,8 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-
-// ⚠️ IMPORTANT: Vercel Serverless Functions sont stateless
-// L'état en mémoire se réinitialise à chaque cold start
-// Pour la production, utilisez Vercel KV, Redis, ou une base de données
+import { kv } from '@vercel/kv';
 
 // ============================================
 // TYPES
@@ -40,12 +37,11 @@ interface GameState {
   roundActive: boolean;
   roundWinners: string[];
   revealedHints: number[];
-  resetAt: string | null; // Timestamp du dernier reset pour forcer la déconnexion des joueurs
-  // Nouveau: code d'accès et gestion de la partie
-  accessCode: string | null; // Code défini par l'admin pour rejoindre
-  isActive: boolean; // La partie existe-t-elle ?
-  expiresAt: string | null; // Expiration automatique après 48h
-  adminCreatedAt: string | null; // Quand l'admin a créé la partie
+  resetAt: string | null;
+  accessCode: string | null;
+  isActive: boolean;
+  expiresAt: string | null;
+  adminCreatedAt: string | null;
 }
 
 // ============================================
@@ -85,32 +81,55 @@ const DEFAULT_ROUNDS: RoundConfig[] = [
 ];
 
 // ============================================
-// ÉTAT GLOBAL (réinitialisé à chaque cold start)
+// KEYS POUR VERCEL KV
 // ============================================
-let gameState: GameState = {
-  id: `game_${Date.now()}`,
-  rounds: JSON.parse(JSON.stringify(DEFAULT_ROUNDS)),
-  isStarted: false,
-  startedAt: null,
-  createdAt: new Date().toISOString(),
-  gameMode: 'free',
-  currentRound: 0,
-  roundActive: false,
-  roundWinners: [],
-  revealedHints: [0, 0, 0, 0, 0, 0],
-  resetAt: null,
-  // Pas de partie active par défaut
-  accessCode: null,
-  isActive: false,
-  expiresAt: null,
-  adminCreatedAt: null,
-};
-
-let players: Record<string, Player> = {};
+const GAME_STATE_KEY = 'cryptex:gameState';
+const PLAYERS_KEY = 'cryptex:players';
 
 // ============================================
-// HELPERS
+// HELPERS - VERCEL KV
 // ============================================
+async function getGameState(): Promise<GameState> {
+  const state = await kv.get<GameState>(GAME_STATE_KEY);
+  if (!state) {
+    return createDefaultGameState();
+  }
+  return state;
+}
+
+async function setGameState(state: GameState): Promise<void> {
+  await kv.set(GAME_STATE_KEY, state);
+}
+
+async function getPlayers(): Promise<Record<string, Player>> {
+  const players = await kv.get<Record<string, Player>>(PLAYERS_KEY);
+  return players || {};
+}
+
+async function setPlayers(players: Record<string, Player>): Promise<void> {
+  await kv.set(PLAYERS_KEY, players);
+}
+
+function createDefaultGameState(): GameState {
+  return {
+    id: `game_${Date.now()}`,
+    rounds: JSON.parse(JSON.stringify(DEFAULT_ROUNDS)),
+    isStarted: false,
+    startedAt: null,
+    createdAt: new Date().toISOString(),
+    gameMode: 'free',
+    currentRound: 0,
+    roundActive: false,
+    roundWinners: [],
+    revealedHints: [0, 0, 0, 0, 0, 0],
+    resetAt: null,
+    accessCode: null,
+    isActive: false,
+    expiresAt: null,
+    adminCreatedAt: null,
+  };
+}
+
 function createPlayer(username: string, avatar?: string): Player {
   return {
     username,
@@ -126,7 +145,7 @@ function createPlayer(username: string, avatar?: string): Player {
   };
 }
 
-function getPlayersForAPI() {
+function getPlayersForAPI(players: Record<string, Player>, gameState: GameState) {
   return Object.values(players).map(p => ({
     username: p.username,
     currentRound: gameState.gameMode === 'controlled' ? gameState.currentRound : p.currentRound + 1,
@@ -137,7 +156,7 @@ function getPlayersForAPI() {
   }));
 }
 
-function getLeaderboard() {
+function getLeaderboard(players: Record<string, Player>) {
   return Object.values(players)
     .sort((a, b) => {
       if (a.isFinished !== b.isFinished) return (b.isFinished ? 1 : 0) - (a.isFinished ? 1 : 0);
@@ -159,7 +178,7 @@ function getLeaderboard() {
     }));
 }
 
-function getRoundWinners() {
+function getRoundWinners(players: Record<string, Player>, gameState: GameState) {
   return gameState.roundWinners.map(username => {
     const player = players[username];
     const roundIndex = gameState.currentRound - 1;
@@ -173,7 +192,7 @@ function getRoundWinners() {
 // ============================================
 // HANDLER PRINCIPAL
 // ============================================
-export default function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -184,556 +203,584 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const { method } = req;
-  const { action, admin, username: queryUsername } = req.query;
+  const { action, admin } = req.query;
 
-  // ========================================
-  // GET - Récupérer l'état du jeu
-  // ========================================
-  if (method === 'GET') {
-    // Player specific endpoint
-    if (req.url?.includes('/player/')) {
-      const username = req.url.split('/player/')[1]?.split('?')[0];
-      const player = players[username || ''];
-      if (!player) {
-        return res.status(404).json({ error: 'Player not found' });
-      }
-      return res.status(200).json({
-        username: player.username,
-        currentRound: gameState.gameMode === 'controlled' ? gameState.currentRound : player.currentRound,
-        roundsCompleted: player.roundsCompleted,
-        isFinished: player.isFinished,
-        hasFoundCurrentRound: player.hasFoundCurrentRound,
-        gameMode: gameState.gameMode,
-        roundActive: gameState.roundActive,
-      });
-    }
+  try {
+    // ========================================
+    // GET - Récupérer l'état du jeu
+    // ========================================
+    if (method === 'GET') {
+      const gameState = await getGameState();
+      const players = await getPlayers();
 
-    // Leaderboard endpoint
-    if (req.url?.includes('/leaderboard')) {
-      return res.status(200).json({
-        leaderboard: getLeaderboard(),
-        gameStarted: gameState.isStarted,
-        gameMode: gameState.gameMode,
-        currentRound: gameState.currentRound,
-        totalPlayers: Object.keys(players).length,
-      });
-    }
-
-    // Main game state
-    const response: Record<string, unknown> = {
-      id: gameState.id,
-      isStarted: gameState.isStarted,
-      startedAt: gameState.startedAt,
-      createdAt: gameState.createdAt,
-      gameMode: gameState.gameMode,
-      currentRound: gameState.currentRound,
-      roundActive: gameState.roundActive,
-      connectedPlayers: Object.keys(players),
-      playerCount: Object.keys(players).length,
-      resetAt: gameState.resetAt,
-      // Nouvelles infos de partie
-      isActive: gameState.isActive,
-      accessCode: gameState.accessCode,
-      expiresAt: gameState.expiresAt,
-      adminCreatedAt: gameState.adminCreatedAt,
-    };
-
-    if (admin === 'true') {
-      response.rounds = gameState.rounds;
-      response.players = getPlayersForAPI();
-      response.leaderboard = getLeaderboard();
-      response.roundWinners = getRoundWinners();
-      response.totalWinners = gameState.roundWinners.length;
-      response.revealedHints = gameState.revealedHints;
-      return res.status(200).json(response);
-    }
-
-    // Public: sans solutions, avec indices révélés
-    response.rounds = gameState.rounds.map((r, index) => {
-      const hintsCount = gameState.revealedHints[index] || 0;
-      return {
-        id: r.id,
-        name: r.name,
-        difficulty: r.difficulty,
-        question: r.question,
-        hints: r.hints ? r.hints.slice(0, hintsCount) : [],
-        totalHints: r.hints ? r.hints.length : 0,
-        revealedHints: hintsCount,
-      };
-    });
-    response.revealedHints = gameState.revealedHints;
-    
-    return res.status(200).json(response);
-  }
-
-  // ========================================
-  // POST - Actions
-  // ========================================
-  if (method === 'POST') {
-    const body = req.body || {};
-
-    switch (action) {
-      // Mode de jeu
-      case 'set-mode': {
-        const { mode } = body;
-        if (!['free', 'controlled'].includes(mode)) {
-          return res.status(400).json({ error: 'Invalid mode' });
-        }
-        gameState.gameMode = mode;
-        return res.status(200).json({ success: true, gameMode: mode });
-      }
-
-      // Démarrer le jeu
-      case 'start': {
-        if (gameState.isStarted) {
-          return res.status(400).json({ error: 'Game already started' });
-        }
-        gameState.isStarted = true;
-        gameState.startedAt = new Date().toISOString();
-        
-        if (gameState.gameMode === 'free') {
-          const now = Date.now();
-          Object.values(players).forEach(p => {
-            p.roundStartTime = now;
-            p.currentRound = 0;
-          });
-        } else {
-          gameState.currentRound = 0;
-          gameState.roundActive = false;
-          gameState.roundWinners = [];
-        }
-        
-        return res.status(200).json({ success: true, game: gameState });
-      }
-
-      // Lancer une manche (mode contrôlé)
-      case 'launch-round': {
-        if (gameState.gameMode !== 'controlled') {
-          return res.status(400).json({ error: 'Only available in controlled mode' });
-        }
-        if (!gameState.isStarted) {
-          return res.status(400).json({ error: 'Game not started' });
-        }
-
-        const nextRound = gameState.currentRound + 1;
-        if (nextRound > 6) {
-          return res.status(400).json({ error: 'All rounds completed' });
-        }
-
-        gameState.currentRound = nextRound;
-        gameState.roundActive = true;
-        gameState.roundWinners = [];
-        
-        const now = Date.now();
-        Object.values(players).forEach(p => {
-          p.hasFoundCurrentRound = false;
-          p.roundStartTime = now;
-        });
-
-        return res.status(200).json({ 
-          success: true, 
-          currentRound: nextRound,
-          roundActive: true,
-        });
-      }
-
-      // Terminer une manche
-      case 'end-round': {
-        if (gameState.gameMode !== 'controlled') {
-          return res.status(400).json({ error: 'Only available in controlled mode' });
-        }
-        
-        gameState.roundActive = false;
-        
-        if (gameState.currentRound >= 6) {
-          Object.values(players).forEach(p => {
-            if (p.roundsCompleted.every(Boolean)) {
-              p.isFinished = true;
-              p.finishedAt = new Date().toISOString();
-            }
-          });
-        }
-        
-        return res.status(200).json({ 
-          success: true, 
-          roundActive: false,
-          winners: getRoundWinners(),
-        });
-      }
-
-      // Révéler un indice
-      case 'reveal-hint': {
-        const { roundId } = body;
-        if (!roundId) {
-          return res.status(400).json({ error: 'roundId required' });
-        }
-        
-        const roundIndex = roundId - 1;
-        if (roundIndex < 0 || roundIndex >= 6) {
-          return res.status(400).json({ error: 'Invalid round' });
-        }
-        
-        const round = gameState.rounds[roundIndex];
-        const currentHints = gameState.revealedHints[roundIndex];
-        
-        if (currentHints >= 3 || !round.hints || round.hints.length <= currentHints) {
-          return res.status(400).json({ error: 'No more hints available' });
-        }
-        
-        gameState.revealedHints[roundIndex] = currentHints + 1;
-        
-        return res.status(200).json({ 
-          success: true, 
-          roundId,
-          hintsRevealed: gameState.revealedHints[roundIndex],
-          hint: round.hints[currentHints],
-        });
-      }
-
-      // Arrêter le jeu
-      case 'stop': {
-        gameState.isStarted = false;
-        gameState.roundActive = false;
-        return res.status(200).json({ success: true, game: gameState });
-      }
-
-      // Reset complet - termine la partie
-      case 'reset': {
-        const resetTimestamp = new Date().toISOString();
-        gameState = {
-          id: `game_${Date.now()}`,
-          rounds: JSON.parse(JSON.stringify(DEFAULT_ROUNDS)),
-          isStarted: false,
-          startedAt: null,
-          createdAt: resetTimestamp,
-          gameMode: 'free',
-          currentRound: 0,
-          roundActive: false,
-          roundWinners: [],
-          revealedHints: [0, 0, 0, 0, 0, 0],
-          resetAt: resetTimestamp,
-          accessCode: null,
-          isActive: false,
-          expiresAt: null,
-          adminCreatedAt: null,
-        };
-        players = {};
-        return res.status(200).json({ success: true, game: gameState, resetAt: resetTimestamp });
-      }
-
-      // Créer une nouvelle partie (admin)
-      case 'create-game': {
-        const { code } = body;
-        if (!code || code.length < 4) {
-          return res.status(400).json({ error: 'Code must be at least 4 characters' });
-        }
-        
-        const now = new Date();
-        const expiresAt = new Date(now.getTime() + 48 * 60 * 60 * 1000); // 48h
-        
-        gameState = {
-          id: `game_${Date.now()}`,
-          rounds: JSON.parse(JSON.stringify(DEFAULT_ROUNDS)),
-          isStarted: false,
-          startedAt: null,
-          createdAt: now.toISOString(),
-          gameMode: 'free',
-          currentRound: 0,
-          roundActive: false,
-          roundWinners: [],
-          revealedHints: [0, 0, 0, 0, 0, 0],
-          resetAt: null,
-          accessCode: code.toUpperCase(),
-          isActive: true,
-          expiresAt: expiresAt.toISOString(),
-          adminCreatedAt: now.toISOString(),
-        };
-        players = {};
-        
-        return res.status(200).json({ 
-          success: true, 
-          game: {
-            id: gameState.id,
-            accessCode: gameState.accessCode,
-            isActive: gameState.isActive,
-            expiresAt: gameState.expiresAt,
-          }
-        });
-      }
-
-      // Valider le code d'accès
-      case 'validate-code': {
-        const { code } = body;
-        if (!code) {
-          return res.status(400).json({ error: 'Code required' });
-        }
-        
-        // Vérifier si la partie existe et n'est pas expirée
-        if (!gameState.isActive || !gameState.accessCode) {
-          return res.status(404).json({ 
-            error: 'No active game',
-            message: 'Aucune partie active. L\'admin doit d\'abord créer une partie.'
-          });
-        }
-        
-        // Vérifier expiration
-        if (gameState.expiresAt && new Date() > new Date(gameState.expiresAt)) {
-          return res.status(410).json({ 
-            error: 'Game expired',
-            message: 'Cette partie a expiré (48h).'
-          });
-        }
-        
-        // Vérifier le code
-        if (code.toUpperCase() !== gameState.accessCode) {
-          return res.status(401).json({ 
-            error: 'Invalid code',
-            message: 'Code invalide'
-          });
-        }
-        
-        return res.status(200).json({ 
-          success: true,
-          gameId: gameState.id,
-        });
-      }
-
-      // Vérifier si un joueur existe (pour reconnexion)
-      case 'reconnect': {
-        const { username } = body;
-        if (!username) {
-          return res.status(400).json({ error: 'Username required' });
-        }
-        
-        // Vérifier si la partie est active
-        if (!gameState.isActive) {
-          return res.status(404).json({ 
-            error: 'No active game',
-            reconnect: false 
-          });
-        }
-        
-        // Vérifier si le joueur existe
-        const player = players[username];
-        if (!player) {
-          return res.status(404).json({ 
-            error: 'Player not found',
-            reconnect: false 
-          });
-        }
-        
-        return res.status(200).json({ 
-          success: true,
-          reconnect: true,
-          player: {
-            username: player.username,
-            avatar: player.avatar,
-            currentRound: player.currentRound,
-            isFinished: player.isFinished,
-          },
-          game: {
-            id: gameState.id,
-            isStarted: gameState.isStarted,
-            gameMode: gameState.gameMode,
-            accessCode: gameState.accessCode,
-          }
-        });
-      }
-
-      // Terminer la partie (admin uniquement)
-      case 'end-game': {
-        gameState.isActive = false;
-        gameState.resetAt = new Date().toISOString();
-        return res.status(200).json({ 
-          success: true, 
-          message: 'Partie terminée',
-          resetAt: gameState.resetAt,
-        });
-      }
-
-      // Rejoindre
-      case 'join': {
-        const { username, avatar } = body;
-        if (!username) {
-          return res.status(400).json({ error: 'Username required' });
-        }
-        
-        // Vérifier que la partie est active
-        if (!gameState.isActive) {
-          return res.status(404).json({ 
-            error: 'No active game',
-            message: 'Aucune partie active. L\'admin doit d\'abord créer une partie.'
-          });
-        }
-        
-        // Vérifier expiration
-        if (gameState.expiresAt && new Date() > new Date(gameState.expiresAt)) {
-          return res.status(410).json({ 
-            error: 'Game expired',
-            message: 'Cette partie a expiré.'
-          });
-        }
-        
-        // Si la partie est lancée et le joueur n'existe pas, refuser
-        if (gameState.isStarted && !players[username]) {
-          return res.status(403).json({ 
-            error: 'Game already started',
-            message: 'La partie a déjà commencé. Demandez à l\'admin de reset pour une nouvelle partie.'
-          });
-        }
-        
-        if (!players[username]) {
-          players[username] = createPlayer(username, avatar);
-        } else if (avatar) {
-          // Update avatar if player already exists
-          players[username].avatar = avatar;
-        }
-        
-        return res.status(200).json({ 
-          success: true, 
-          player: players[username],
-          game: {
-            id: gameState.id,
-            isStarted: gameState.isStarted,
-            gameMode: gameState.gameMode,
-            currentRound: gameState.currentRound,
-            roundActive: gameState.roundActive,
-            connectedPlayers: Object.keys(players),
-            accessCode: gameState.accessCode,
-          }
-        });
-      }
-
-      // Quitter
-      case 'leave': {
-        const { username: leaveUser } = body;
-        if (leaveUser && players[leaveUser]) {
-          delete players[leaveUser];
-          gameState.roundWinners = gameState.roundWinners.filter(u => u !== leaveUser);
-        }
-        return res.status(200).json({ success: true });
-      }
-
-      // Vérifier une solution
-      case 'check': {
-        const { username: checkUser, roundId, solution } = body;
-        
-        if (!roundId || !solution) {
-          return res.status(400).json({ error: 'roundId and solution required' });
-        }
-
-        if (gameState.gameMode === 'controlled') {
-          if (roundId !== gameState.currentRound) {
-            return res.status(400).json({ error: 'Not the current round' });
-          }
-          if (!gameState.roundActive) {
-            return res.status(400).json({ error: 'Round not active yet' });
-          }
-        }
-        
-        const round = gameState.rounds.find(r => r.id === roundId);
-        if (!round) {
-          return res.status(404).json({ error: 'Round not found' });
-        }
-
-        const isCorrect = solution?.toUpperCase() === round.solution;
-        
-        return res.status(200).json({ 
-          correct: isCorrect,
-          solution: isCorrect ? round.solution : undefined,
-        });
-      }
-
-      // Compléter un round
-      case 'complete-round': {
-        const { username: completeUser, roundId, timeSeconds } = body;
-        
-        if (!completeUser || roundId === undefined) {
-          return res.status(400).json({ error: 'username and roundId required' });
-        }
-        
-        const player = players[completeUser];
+      // Player specific endpoint
+      if (req.url?.includes('/player/')) {
+        const username = req.url.split('/player/')[1]?.split('?')[0];
+        const player = players[username || ''];
         if (!player) {
           return res.status(404).json({ error: 'Player not found' });
         }
-        
-        const roundIndex = roundId - 1;
-        if (roundIndex < 0 || roundIndex >= 6) {
-          return res.status(400).json({ error: 'Invalid round' });
-        }
-
-        const time = timeSeconds || (player.roundStartTime 
-          ? Math.round((Date.now() - player.roundStartTime) / 1000)
-          : 60);
-        
-        player.roundsCompleted[roundIndex] = true;
-        player.roundTimes[roundIndex] = time;
-
-        if (gameState.gameMode === 'controlled') {
-          player.hasFoundCurrentRound = true;
-          if (!gameState.roundWinners.includes(completeUser)) {
-            gameState.roundWinners.push(completeUser);
-          }
-          
-          return res.status(200).json({
-            success: true,
-            isFinished: false,
-            waitingForNextRound: true,
-            position: gameState.roundWinners.indexOf(completeUser) + 1,
-            leaderboard: getLeaderboard().slice(0, 5),
-          });
-        } else {
-          const allCompleted = player.roundsCompleted.every(Boolean);
-          if (allCompleted) {
-            player.isFinished = true;
-            player.finishedAt = new Date().toISOString();
-          } else {
-            player.currentRound = roundIndex + 1;
-            player.roundStartTime = Date.now();
-          }
-          
-          return res.status(200).json({
-            success: true,
-            isFinished: player.isFinished,
-            nextRound: player.isFinished ? null : player.currentRound + 1,
-            leaderboard: getLeaderboard().slice(0, 5),
-          });
-        }
+        return res.status(200).json({
+          username: player.username,
+          currentRound: gameState.gameMode === 'controlled' ? gameState.currentRound : player.currentRound,
+          roundsCompleted: player.roundsCompleted,
+          isFinished: player.isFinished,
+          hasFoundCurrentRound: player.hasFoundCurrentRound,
+          gameMode: gameState.gameMode,
+          roundActive: gameState.roundActive,
+        });
       }
 
-      default:
-        return res.status(400).json({ error: 'Invalid action' });
+      // Leaderboard endpoint
+      if (req.url?.includes('/leaderboard')) {
+        return res.status(200).json({
+          leaderboard: getLeaderboard(players),
+          gameStarted: gameState.isStarted,
+          gameMode: gameState.gameMode,
+          currentRound: gameState.currentRound,
+          totalPlayers: Object.keys(players).length,
+        });
+      }
+
+      // Main game state
+      const response: Record<string, unknown> = {
+        id: gameState.id,
+        isStarted: gameState.isStarted,
+        startedAt: gameState.startedAt,
+        createdAt: gameState.createdAt,
+        gameMode: gameState.gameMode,
+        currentRound: gameState.currentRound,
+        roundActive: gameState.roundActive,
+        connectedPlayers: Object.keys(players),
+        playerCount: Object.keys(players).length,
+        resetAt: gameState.resetAt,
+        isActive: gameState.isActive,
+        accessCode: gameState.accessCode,
+        expiresAt: gameState.expiresAt,
+        adminCreatedAt: gameState.adminCreatedAt,
+      };
+
+      if (admin === 'true') {
+        response.rounds = gameState.rounds;
+        response.players = getPlayersForAPI(players, gameState);
+        response.leaderboard = getLeaderboard(players);
+        response.roundWinners = getRoundWinners(players, gameState);
+        response.totalWinners = gameState.roundWinners.length;
+        response.revealedHints = gameState.revealedHints;
+        return res.status(200).json(response);
+      }
+
+      // Public: sans solutions, avec indices révélés
+      response.rounds = gameState.rounds.map((r, index) => {
+        const hintsCount = gameState.revealedHints[index] || 0;
+        return {
+          id: r.id,
+          name: r.name,
+          difficulty: r.difficulty,
+          question: r.question,
+          hints: r.hints ? r.hints.slice(0, hintsCount) : [],
+          totalHints: r.hints ? r.hints.length : 0,
+          revealedHints: hintsCount,
+        };
+      });
+      response.revealedHints = gameState.revealedHints;
+      
+      return res.status(200).json(response);
     }
+
+    // ========================================
+    // POST - Actions
+    // ========================================
+    if (method === 'POST') {
+      const body = req.body || {};
+      let gameState = await getGameState();
+      let players = await getPlayers();
+
+      switch (action) {
+        // Mode de jeu
+        case 'set-mode': {
+          const { mode } = body;
+          if (!['free', 'controlled'].includes(mode)) {
+            return res.status(400).json({ error: 'Invalid mode' });
+          }
+          gameState.gameMode = mode;
+          await setGameState(gameState);
+          return res.status(200).json({ success: true, gameMode: mode });
+        }
+
+        // Démarrer le jeu
+        case 'start': {
+          if (gameState.isStarted) {
+            return res.status(400).json({ error: 'Game already started' });
+          }
+          gameState.isStarted = true;
+          gameState.startedAt = new Date().toISOString();
+          
+          if (gameState.gameMode === 'free') {
+            const now = Date.now();
+            Object.values(players).forEach(p => {
+              p.roundStartTime = now;
+              p.currentRound = 0;
+            });
+            await setPlayers(players);
+          } else {
+            gameState.currentRound = 0;
+            gameState.roundActive = false;
+            gameState.roundWinners = [];
+          }
+          
+          await setGameState(gameState);
+          return res.status(200).json({ success: true, game: gameState });
+        }
+
+        // Lancer une manche (mode contrôlé)
+        case 'launch-round': {
+          if (gameState.gameMode !== 'controlled') {
+            return res.status(400).json({ error: 'Only available in controlled mode' });
+          }
+          if (!gameState.isStarted) {
+            return res.status(400).json({ error: 'Game not started' });
+          }
+
+          const nextRound = gameState.currentRound + 1;
+          if (nextRound > 6) {
+            return res.status(400).json({ error: 'All rounds completed' });
+          }
+
+          gameState.currentRound = nextRound;
+          gameState.roundActive = true;
+          gameState.roundWinners = [];
+          
+          const now = Date.now();
+          Object.values(players).forEach(p => {
+            p.hasFoundCurrentRound = false;
+            p.roundStartTime = now;
+          });
+
+          await setGameState(gameState);
+          await setPlayers(players);
+
+          return res.status(200).json({ 
+            success: true, 
+            currentRound: nextRound,
+            roundActive: true,
+          });
+        }
+
+        // Terminer une manche
+        case 'end-round': {
+          if (gameState.gameMode !== 'controlled') {
+            return res.status(400).json({ error: 'Only available in controlled mode' });
+          }
+          
+          gameState.roundActive = false;
+          
+          if (gameState.currentRound >= 6) {
+            Object.values(players).forEach(p => {
+              if (p.roundsCompleted.every(Boolean)) {
+                p.isFinished = true;
+                p.finishedAt = new Date().toISOString();
+              }
+            });
+            await setPlayers(players);
+          }
+          
+          await setGameState(gameState);
+
+          return res.status(200).json({ 
+            success: true, 
+            roundActive: false,
+            winners: getRoundWinners(players, gameState),
+          });
+        }
+
+        // Révéler un indice
+        case 'reveal-hint': {
+          const { roundId } = body;
+          if (!roundId) {
+            return res.status(400).json({ error: 'roundId required' });
+          }
+          
+          const roundIndex = roundId - 1;
+          if (roundIndex < 0 || roundIndex >= 6) {
+            return res.status(400).json({ error: 'Invalid round' });
+          }
+          
+          const round = gameState.rounds[roundIndex];
+          const currentHints = gameState.revealedHints[roundIndex];
+          
+          if (currentHints >= 3 || !round.hints || round.hints.length <= currentHints) {
+            return res.status(400).json({ error: 'No more hints available' });
+          }
+          
+          gameState.revealedHints[roundIndex] = currentHints + 1;
+          await setGameState(gameState);
+          
+          return res.status(200).json({ 
+            success: true, 
+            roundId,
+            hintsRevealed: gameState.revealedHints[roundIndex],
+            hint: round.hints[currentHints],
+          });
+        }
+
+        // Arrêter le jeu
+        case 'stop': {
+          gameState.isStarted = false;
+          gameState.roundActive = false;
+          await setGameState(gameState);
+          return res.status(200).json({ success: true, game: gameState });
+        }
+
+        // Reset complet - termine la partie
+        case 'reset': {
+          const resetTimestamp = new Date().toISOString();
+          gameState = {
+            ...createDefaultGameState(),
+            resetAt: resetTimestamp,
+          };
+          players = {};
+          await setGameState(gameState);
+          await setPlayers(players);
+          return res.status(200).json({ success: true, game: gameState, resetAt: resetTimestamp });
+        }
+
+        // Créer une nouvelle partie (admin)
+        case 'create-game': {
+          const { code } = body;
+          if (!code || code.length < 4) {
+            return res.status(400).json({ error: 'Code must be at least 4 characters' });
+          }
+          
+          const now = new Date();
+          const expiresAt = new Date(now.getTime() + 48 * 60 * 60 * 1000); // 48h
+          
+          gameState = {
+            id: `game_${Date.now()}`,
+            rounds: JSON.parse(JSON.stringify(DEFAULT_ROUNDS)),
+            isStarted: false,
+            startedAt: null,
+            createdAt: now.toISOString(),
+            gameMode: 'free',
+            currentRound: 0,
+            roundActive: false,
+            roundWinners: [],
+            revealedHints: [0, 0, 0, 0, 0, 0],
+            resetAt: null,
+            accessCode: code.toUpperCase(),
+            isActive: true,
+            expiresAt: expiresAt.toISOString(),
+            adminCreatedAt: now.toISOString(),
+          };
+          players = {};
+          
+          await setGameState(gameState);
+          await setPlayers(players);
+          
+          return res.status(200).json({ 
+            success: true, 
+            game: {
+              id: gameState.id,
+              accessCode: gameState.accessCode,
+              isActive: gameState.isActive,
+              expiresAt: gameState.expiresAt,
+            }
+          });
+        }
+
+        // Valider le code d'accès
+        case 'validate-code': {
+          const { code } = body;
+          if (!code) {
+            return res.status(400).json({ error: 'Code required' });
+          }
+          
+          // Vérifier si la partie existe et n'est pas expirée
+          if (!gameState.isActive || !gameState.accessCode) {
+            return res.status(404).json({ 
+              error: 'No active game',
+              message: 'Aucune partie active. L\'admin doit d\'abord créer une partie.'
+            });
+          }
+          
+          // Vérifier expiration
+          if (gameState.expiresAt && new Date() > new Date(gameState.expiresAt)) {
+            return res.status(410).json({ 
+              error: 'Game expired',
+              message: 'Cette partie a expiré (48h).'
+            });
+          }
+          
+          // Vérifier le code
+          if (code.toUpperCase() !== gameState.accessCode) {
+            return res.status(401).json({ 
+              error: 'Invalid code',
+              message: 'Code invalide'
+            });
+          }
+          
+          return res.status(200).json({ 
+            success: true,
+            gameId: gameState.id,
+          });
+        }
+
+        // Vérifier si un joueur existe (pour reconnexion)
+        case 'reconnect': {
+          const { username } = body;
+          if (!username) {
+            return res.status(400).json({ error: 'Username required' });
+          }
+          
+          // Vérifier si la partie est active
+          if (!gameState.isActive) {
+            return res.status(404).json({ 
+              error: 'No active game',
+              reconnect: false 
+            });
+          }
+          
+          // Vérifier si le joueur existe
+          const player = players[username];
+          if (!player) {
+            return res.status(404).json({ 
+              error: 'Player not found',
+              reconnect: false 
+            });
+          }
+          
+          return res.status(200).json({ 
+            success: true,
+            reconnect: true,
+            player: {
+              username: player.username,
+              avatar: player.avatar,
+              currentRound: player.currentRound,
+              isFinished: player.isFinished,
+            },
+            game: {
+              id: gameState.id,
+              isStarted: gameState.isStarted,
+              gameMode: gameState.gameMode,
+              accessCode: gameState.accessCode,
+            }
+          });
+        }
+
+        // Terminer la partie (admin uniquement)
+        case 'end-game': {
+          gameState.isActive = false;
+          gameState.resetAt = new Date().toISOString();
+          await setGameState(gameState);
+          return res.status(200).json({ 
+            success: true, 
+            message: 'Partie terminée',
+            resetAt: gameState.resetAt,
+          });
+        }
+
+        // Rejoindre
+        case 'join': {
+          const { username, avatar } = body;
+          if (!username) {
+            return res.status(400).json({ error: 'Username required' });
+          }
+          
+          // Vérifier que la partie est active
+          if (!gameState.isActive) {
+            return res.status(404).json({ 
+              error: 'No active game',
+              message: 'Aucune partie active. L\'admin doit d\'abord créer une partie.'
+            });
+          }
+          
+          // Vérifier expiration
+          if (gameState.expiresAt && new Date() > new Date(gameState.expiresAt)) {
+            return res.status(410).json({ 
+              error: 'Game expired',
+              message: 'Cette partie a expiré.'
+            });
+          }
+          
+          // Si la partie est lancée et le joueur n'existe pas, refuser
+          if (gameState.isStarted && !players[username]) {
+            return res.status(403).json({ 
+              error: 'Game already started',
+              message: 'La partie a déjà commencé. Demandez à l\'admin de reset pour une nouvelle partie.'
+            });
+          }
+          
+          if (!players[username]) {
+            players[username] = createPlayer(username, avatar);
+          } else if (avatar) {
+            players[username].avatar = avatar;
+          }
+          
+          await setPlayers(players);
+          
+          return res.status(200).json({ 
+            success: true, 
+            player: players[username],
+            game: {
+              id: gameState.id,
+              isStarted: gameState.isStarted,
+              gameMode: gameState.gameMode,
+              currentRound: gameState.currentRound,
+              roundActive: gameState.roundActive,
+              connectedPlayers: Object.keys(players),
+              accessCode: gameState.accessCode,
+            }
+          });
+        }
+
+        // Quitter
+        case 'leave': {
+          const { username: leaveUser } = body;
+          if (leaveUser && players[leaveUser]) {
+            delete players[leaveUser];
+            gameState.roundWinners = gameState.roundWinners.filter(u => u !== leaveUser);
+            await setPlayers(players);
+            await setGameState(gameState);
+          }
+          return res.status(200).json({ success: true });
+        }
+
+        // Vérifier une solution
+        case 'check': {
+          const { roundId, solution } = body;
+          
+          if (!roundId || !solution) {
+            return res.status(400).json({ error: 'roundId and solution required' });
+          }
+
+          if (gameState.gameMode === 'controlled') {
+            if (roundId !== gameState.currentRound) {
+              return res.status(400).json({ error: 'Not the current round' });
+            }
+            if (!gameState.roundActive) {
+              return res.status(400).json({ error: 'Round not active yet' });
+            }
+          }
+          
+          const round = gameState.rounds.find(r => r.id === roundId);
+          if (!round) {
+            return res.status(404).json({ error: 'Round not found' });
+          }
+
+          const isCorrect = solution?.toUpperCase() === round.solution;
+          
+          return res.status(200).json({ 
+            correct: isCorrect,
+            solution: isCorrect ? round.solution : undefined,
+          });
+        }
+
+        // Compléter un round
+        case 'complete-round': {
+          const { username: completeUser, roundId, timeSeconds } = body;
+          
+          if (!completeUser || roundId === undefined) {
+            return res.status(400).json({ error: 'username and roundId required' });
+          }
+          
+          const player = players[completeUser];
+          if (!player) {
+            return res.status(404).json({ error: 'Player not found' });
+          }
+          
+          const roundIndex = roundId - 1;
+          if (roundIndex < 0 || roundIndex >= 6) {
+            return res.status(400).json({ error: 'Invalid round' });
+          }
+
+          const time = timeSeconds || (player.roundStartTime 
+            ? Math.round((Date.now() - player.roundStartTime) / 1000)
+            : 60);
+          
+          player.roundsCompleted[roundIndex] = true;
+          player.roundTimes[roundIndex] = time;
+
+          if (gameState.gameMode === 'controlled') {
+            player.hasFoundCurrentRound = true;
+            if (!gameState.roundWinners.includes(completeUser)) {
+              gameState.roundWinners.push(completeUser);
+            }
+            
+            await setPlayers(players);
+            await setGameState(gameState);
+            
+            return res.status(200).json({
+              success: true,
+              isFinished: false,
+              waitingForNextRound: true,
+              position: gameState.roundWinners.indexOf(completeUser) + 1,
+              leaderboard: getLeaderboard(players).slice(0, 5),
+            });
+          } else {
+            const allCompleted = player.roundsCompleted.every(Boolean);
+            if (allCompleted) {
+              player.isFinished = true;
+              player.finishedAt = new Date().toISOString();
+            } else {
+              player.currentRound = roundIndex + 1;
+              player.roundStartTime = Date.now();
+            }
+            
+            await setPlayers(players);
+            
+            return res.status(200).json({
+              success: true,
+              isFinished: player.isFinished,
+              nextRound: player.isFinished ? null : player.currentRound + 1,
+              leaderboard: getLeaderboard(players).slice(0, 5),
+            });
+          }
+        }
+
+        default:
+          return res.status(400).json({ error: 'Invalid action' });
+      }
+    }
+
+    // ========================================
+    // PUT - Mettre à jour une manche
+    // ========================================
+    if (method === 'PUT') {
+      const { roundId, updates } = req.body || {};
+      
+      if (!roundId || !updates) {
+        return res.status(400).json({ error: 'roundId and updates required' });
+      }
+
+      const gameState = await getGameState();
+      const roundIndex = gameState.rounds.findIndex(r => r.id === roundId);
+      if (roundIndex === -1) {
+        return res.status(404).json({ error: 'Round not found' });
+      }
+
+      if (updates.solution) {
+        updates.solution = updates.solution.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6).padEnd(6, 'A');
+      }
+
+      gameState.rounds[roundIndex] = {
+        ...gameState.rounds[roundIndex],
+        ...updates,
+      };
+
+      await setGameState(gameState);
+
+      return res.status(200).json({ success: true, round: gameState.rounds[roundIndex] });
+    }
+
+    // Method not allowed
+    res.setHeader('Allow', ['GET', 'POST', 'PUT', 'OPTIONS']);
+    return res.status(405).json({ error: `Method ${method} not allowed` });
+
+  } catch (error) {
+    console.error('API Error:', error);
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
-
-  // ========================================
-  // PUT - Mettre à jour une manche
-  // ========================================
-  if (method === 'PUT') {
-    const { roundId, updates } = req.body || {};
-    
-    if (!roundId || !updates) {
-      return res.status(400).json({ error: 'roundId and updates required' });
-    }
-
-    const roundIndex = gameState.rounds.findIndex(r => r.id === roundId);
-    if (roundIndex === -1) {
-      return res.status(404).json({ error: 'Round not found' });
-    }
-
-    if (updates.solution) {
-      updates.solution = updates.solution.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6).padEnd(6, 'A');
-    }
-
-    gameState.rounds[roundIndex] = {
-      ...gameState.rounds[roundIndex],
-      ...updates,
-    };
-
-    return res.status(200).json({ success: true, round: gameState.rounds[roundIndex] });
-  }
-
-  // Method not allowed
-  res.setHeader('Allow', ['GET', 'POST', 'PUT', 'OPTIONS']);
-  return res.status(405).json({ error: `Method ${method} not allowed` });
 }
