@@ -128,21 +128,19 @@ export function AdminPanel() {
         cacheRef.current = { data, timestamp: Date.now() };
         
         // LOGIQUE CRITIQUE : Si on a un accessCode dans le store, on NE ROLLBACK JAMAIS
-        // Même si MongoDB retourne isActive: false, c'est probablement une erreur
-        if (storedAccessCode && !data.isActive && data.accessCode === storedAccessCode) {
-          // MongoDB dit inactive mais on a le même code → erreur de sync
-          // Garder l'état actuel et forcer isActive à true
-          console.warn('MongoDB returned inactive but we have accessCode - forcing active state');
-          setGameState({ ...data, isActive: true, accessCode: storedAccessCode });
-        } else if (storedAccessCode && data.accessCode !== storedAccessCode) {
-          // Code différent → nouvelle partie ou reset, accepter
-          setGameState(data);
-        } else if (!storedAccessCode && data.isActive) {
-          // Pas de code stocké mais MongoDB dit active → mettre à jour le store
-          // (mais on ne peut pas le faire depuis ici, donc on accepte l'état)
-          setGameState(data);
+        // FORCER isActive à true si on a storedAccessCode
+        if (storedAccessCode) {
+          // Si on a un code stocké, la partie EST TOUJOURS active
+          // Même si MongoDB dit le contraire, c'est une erreur de sync
+          const forcedData = {
+            ...data,
+            isActive: true, // FORCER à true
+            accessCode: storedAccessCode, // Utiliser le code du store
+          };
+          setGameState(forcedData);
+          cacheRef.current = { data: forcedData, timestamp: Date.now() };
         } else {
-          // État normal
+          // Pas de code stocké → accepter l'état MongoDB
           setGameState(data);
         }
       } else {
@@ -409,7 +407,28 @@ export function AdminPanel() {
     setActionLoading(null);
   };
 
-  if (isLoading || !gameState) {
+  // PROTECTION ABSOLUE : Si on a un accessCode stocké, on NE ROLLBACK JAMAIS
+  // Même si gameState est null ou isLoading, on crée un état minimal
+  if (storedAccessCode && !gameState) {
+    // Créer un état minimal pour éviter le rollback
+    const minimalState: GameState = {
+      id: 'temp',
+      rounds: [],
+      isStarted: false,
+      startedAt: null,
+      createdAt: new Date().toISOString(),
+      connectedPlayers: [],
+      gameMode: 'free',
+      currentRound: 0,
+      roundActive: false,
+      isActive: true, // FORCER à true
+      accessCode: storedAccessCode,
+    };
+    setGameState(minimalState);
+  }
+
+  // Afficher le loader uniquement pendant le chargement initial
+  if (isLoading && !gameState) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-stone-texture">
         <div className="torch-glow absolute inset-0 pointer-events-none" />
@@ -430,11 +449,45 @@ export function AdminPanel() {
     );
   }
 
-  // Écran de création de partie UNIQUEMENT si :
-  // 1. Pas de code stocké dans le store (source de vérité)
-  // 2. ET MongoDB confirme qu'il n'y a pas de partie active
-  // Si on a un storedAccessCode, on NE ROLLBACK JAMAIS (même si MongoDB dit inactive)
-  const shouldShowCreateScreen = !storedAccessCode && (!gameState || !gameState.isActive);
+  // Si on a un accessCode, FORCER isActive à true même si MongoDB dit le contraire
+  if (storedAccessCode && gameState && !gameState.isActive) {
+    setGameState({ ...gameState, isActive: true, accessCode: storedAccessCode });
+  }
+
+  // PROTECTION ABSOLUE : Si on a un accessCode, on NE ROLLBACK JAMAIS
+  // Même si toutes les conditions sont réunies, si storedAccessCode existe, on continue
+  if (storedAccessCode) {
+    // On a un code → partie existe → continuer avec le panneau admin
+    // (gameState devrait être défini à ce stade grâce aux protections précédentes)
+    if (!gameState) {
+      // Double sécurité : créer un état minimal si gameState est encore null
+      const minimalState: GameState = {
+        id: 'temp',
+        rounds: [],
+        isStarted: false,
+        startedAt: null,
+        createdAt: new Date().toISOString(),
+        connectedPlayers: [],
+        gameMode: 'free',
+        currentRound: 0,
+        roundActive: false,
+        isActive: true,
+        accessCode: storedAccessCode,
+      };
+      setGameState(minimalState);
+      // Ne pas return, continuer pour afficher le panneau admin
+    } else if (!gameState.isActive) {
+      // Forcer isActive à true
+      setGameState({ ...gameState, isActive: true, accessCode: storedAccessCode });
+    }
+    // Continuer pour afficher le panneau admin (pas de return)
+  }
+
+  // Écran de création UNIQUEMENT si :
+  // - Pas de code stocké (storedAccessCode est null/undefined)
+  // - ET pas de partie active dans MongoDB
+  // Si storedAccessCode existe, on NE PEUT PAS arriver ici grâce à la protection ci-dessus
+  const shouldShowCreateScreen = !storedAccessCode && gameState && !gameState.isActive;
   
   if (shouldShowCreateScreen) {
     return (
