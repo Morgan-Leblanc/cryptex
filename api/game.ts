@@ -717,8 +717,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(400).json({ error: 'Code required' });
           }
           
-          // Vérifier si la partie existe et n'est pas expirée
-          if (!gameState.isActive || !gameState.accessCode) {
+          // Vérifier si la partie existe (accessCode est la source de vérité)
+          if (!gameState.accessCode) {
             return res.status(404).json({ 
               error: 'No active game',
               message: 'Aucune partie active. L\'admin doit d\'abord créer une partie.'
@@ -747,6 +747,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
         }
 
+        // Heartbeat - maintenir la présence d'un joueur
+        case 'heartbeat': {
+          const { username } = body;
+          if (!username) {
+            return res.status(400).json({ error: 'Username required' });
+          }
+          
+          // Si le joueur existe, mettre à jour son timestamp de dernière activité
+          if (players[username]) {
+            // Le joueur existe, on met juste à jour son timestamp (optionnel, pour tracking)
+            // Pour l'instant, juste retourner success
+            return res.status(200).json({ 
+              success: true,
+              active: true,
+            });
+          }
+          
+          // Le joueur n'existe pas mais veut maintenir sa présence
+          // Si la partie est active, on peut le recréer (reconnexion)
+          if (gameState.isActive && !gameState.isStarted) {
+            // Partie active mais pas lancée → on peut rejoindre
+            players[username] = createPlayer(username);
+            await setPlayers(players);
+            return res.status(200).json({ 
+              success: true,
+              active: true,
+            });
+          }
+          
+          return res.status(404).json({ 
+            error: 'Player not found',
+            active: false 
+          });
+        }
+
         // Vérifier si un joueur existe (pour reconnexion)
         case 'reconnect': {
           const { username } = body;
@@ -754,17 +789,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(400).json({ error: 'Username required' });
           }
           
-          // Vérifier si la partie est active
-          if (!gameState.isActive) {
-            return res.status(404).json({ 
-              error: 'No active game',
-              reconnect: false 
-            });
-          }
-          
           // Vérifier si le joueur existe
           const player = players[username];
           if (!player) {
+            // Si la partie existe (accessCode), on peut recréer le joueur (reconnexion)
+            if (gameState.accessCode) {
+              // Recréer le joueur pour reconnexion
+              players[username] = createPlayer(username);
+              await setPlayers(players);
+              return res.status(200).json({ 
+                success: true,
+                reconnect: true,
+                player: {
+                  username: players[username].username,
+                  avatar: players[username].avatar,
+                  currentRound: players[username].currentRound,
+                  isFinished: players[username].isFinished,
+                },
+                game: {
+                  id: gameState.id,
+                  isStarted: gameState.isStarted,
+                  gameMode: gameState.gameMode,
+                  accessCode: gameState.accessCode,
+                }
+              });
+            }
             return res.status(404).json({ 
               error: 'Player not found',
               reconnect: false 
@@ -808,8 +857,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(400).json({ error: 'Username required' });
           }
           
-          // Vérifier que la partie est active
-          if (!gameState.isActive) {
+          // Vérifier que la partie existe (accessCode est la source de vérité)
+          if (!gameState.accessCode) {
             return res.status(404).json({ 
               error: 'No active game',
               message: 'Aucune partie active. L\'admin doit d\'abord créer une partie.'
@@ -832,10 +881,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
           }
           
+          // Créer ou mettre à jour le joueur
           if (!players[username]) {
             players[username] = createPlayer(username, avatar);
-          } else if (avatar) {
-            players[username].avatar = avatar;
+          } else {
+            // Joueur existe déjà → mettre à jour avatar si fourni et maintenir sa présence
+            if (avatar) {
+              players[username].avatar = avatar;
+            }
+            // Le joueur reste actif simplement en étant dans la liste
           }
           
           await setPlayers(players);

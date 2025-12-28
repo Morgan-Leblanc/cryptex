@@ -55,6 +55,22 @@ export function useGameSync() {
           }
         }
 
+        // Pour les joueurs : envoyer un heartbeat pour maintenir la présence
+        if (!isAdmin && user) {
+          try {
+            // Heartbeat en parallèle pour maintenir la présence
+            fetch(`${API_BASE}?action=heartbeat`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: user.username }),
+            }).catch(() => {
+              // Ignorer les erreurs de heartbeat, ce n'est pas critique
+            });
+          } catch {
+            // Ignorer
+          }
+        }
+        
         const response = await fetch(API_BASE);
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
@@ -76,7 +92,8 @@ export function useGameSync() {
         if (!isAdmin) {
           if (data.isStarted) {
             setWaitingForStart(false);
-          } else if (data.isActive) {
+          } else if (data.isActive || data.accessCode) {
+            // Si on a un accessCode, la partie existe (même si isActive est false)
             setWaitingForStart(true);
           }
         }

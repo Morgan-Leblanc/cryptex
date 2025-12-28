@@ -58,19 +58,34 @@ export function WaitingRoom() {
     return () => clearInterval(interval);
   }, []);
 
-  // Poll for game state
+  // Poll for game state - avec heartbeat pour maintenir la présence
   const fetchGameState = useCallback(async () => {
     try {
+      // Envoyer un heartbeat pour maintenir la présence
+      if (user?.username) {
+        try {
+          await fetch(`${API_BASE}?action=heartbeat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: user.username }),
+          });
+        } catch {
+          // Ignorer les erreurs de heartbeat
+        }
+      }
+      
+      // Récupérer l'état du jeu
       const response = await fetch(`${API_BASE}?admin=true`);
       if (response.ok) {
         const data = await response.json();
         // Extract player info with avatars
-        if (data.players) {
+        if (data.players && Array.isArray(data.players)) {
           setPlayers(data.players.map((p: { username: string; avatar?: string }) => ({
             username: p.username,
             avatar: p.avatar,
           })));
-        } else if (data.connectedPlayers) {
+        } else if (data.connectedPlayers && Array.isArray(data.connectedPlayers)) {
+          // Fallback sur connectedPlayers si players n'est pas disponible
           setPlayers(data.connectedPlayers.map((name: string) => ({ username: name })));
         }
         
@@ -81,7 +96,7 @@ export function WaitingRoom() {
     } catch (error) {
       console.error('Failed to fetch game state:', error);
     }
-  }, [setWaitingForStart]);
+  }, [setWaitingForStart, user?.username]);
 
   useEffect(() => {
     fetchGameState();
