@@ -140,6 +140,17 @@ async function kvSet(key: string, value: unknown): Promise<boolean> {
   }
 }
 
+async function kvDelete(key: string): Promise<boolean> {
+  try {
+    const db = await getDb();
+    await db.collection('gameState').deleteOne({ _id: key as any });
+    return true;
+  } catch (error) {
+    console.error('MongoDB DELETE error:', error);
+    return false;
+  }
+}
+
 // ============================================
 // TYPES
 // ============================================
@@ -642,9 +653,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ...createDefaultGameState(),
             resetAt: resetTimestamp,
           };
-          players = {};
-          await setGameState(gameState);
-          await setPlayers(players);
+        players = {};
+        await kvDelete(GAME_STATE_KEY);
+        await kvDelete(PLAYERS_KEY);
+        await setGameState(gameState);
+        await setPlayers(players);
           await broadcastLatestState();
           return res.status(200).json({ success: true, game: gameState, resetAt: resetTimestamp });
         }
