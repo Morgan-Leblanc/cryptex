@@ -62,10 +62,14 @@ interface GameState {
   totalWinners?: number;
   // Indices révélés par manche
   revealedHints?: number[];
+  // Nouvelles infos de partie
+  isActive?: boolean;
+  accessCode?: string;
+  expiresAt?: string;
 }
 
 export function AdminPanel() {
-  const { logout } = useGameStore();
+  const { logout, createGame, endGame } = useGameStore();
   
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -75,6 +79,11 @@ export function AdminPanel() {
   const [editForm, setEditForm] = useState<Partial<RoundConfig>>({});
   const [showSolutions, setShowSolutions] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmEndGame, setConfirmEndGame] = useState(false);
+  
+  // Pour la création de partie
+  const [newGameCode, setNewGameCode] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Fetch game state
   const fetchGameState = useCallback(async () => {
@@ -268,6 +277,38 @@ export function AdminPanel() {
     await logout();
   };
 
+  const handleCreateGame = async () => {
+    if (newGameCode.length < 4) {
+      setCreateError('Le code doit contenir au moins 4 caractères');
+      return;
+    }
+    
+    setActionLoading('create');
+    setCreateError(null);
+    
+    const result = await createGame(newGameCode);
+    
+    if (result.error) {
+      setCreateError(result.message || 'Erreur lors de la création');
+    } else {
+      await fetchGameState();
+    }
+    
+    setActionLoading(null);
+  };
+
+  const handleEndGame = async () => {
+    if (!confirmEndGame) {
+      setConfirmEndGame(true);
+      setTimeout(() => setConfirmEndGame(false), 5000);
+      return;
+    }
+    
+    setActionLoading('end');
+    await endGame();
+    setActionLoading(null);
+  };
+
   if (isLoading || !gameState) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-stone-texture">
@@ -284,6 +325,117 @@ export function AdminPanel() {
           <div className="w-full h-full rounded-full flex items-center justify-center bg-stone-950/80">
             <Loader2 className="w-6 h-6 text-amber-500 animate-spin" />
           </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Écran de création de partie si aucune partie n'est active
+  if (!gameState.isActive) {
+    return (
+      <div className="min-h-screen min-h-[100dvh] flex items-center justify-center p-6 bg-stone-texture">
+        <div className="torch-glow absolute inset-0 pointer-events-none" />
+        
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md"
+        >
+          <div className="text-center mb-8">
+            <div 
+              className="inline-flex w-20 h-20 rounded-full items-center justify-center mb-4"
+              style={{
+                background: 'conic-gradient(from 0deg, #8b4513, #d4af37, #ffd700, #d4af37, #8b4513)',
+                boxShadow: '0 0 30px rgba(212, 175, 55, 0.4)',
+              }}
+            >
+              <div 
+                className="w-14 h-14 rounded-full flex items-center justify-center"
+                style={{ background: 'radial-gradient(circle at 30% 30%, #8b4513, #3d1f08)' }}
+              >
+                <Crown className="w-7 h-7 text-amber-200" />
+              </div>
+            </div>
+            
+            <h1 
+              className="font-display text-3xl font-bold tracking-wide mb-2"
+              style={{
+                background: 'linear-gradient(180deg, #f5ede0 0%, #d4af37 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              Créer une Partie
+            </h1>
+            <p className="text-amber-600 text-sm">
+              Définissez le code d'accès pour les joueurs
+            </p>
+          </div>
+
+          <div className="card-parchment p-6">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-amber-400/80 text-sm font-display uppercase tracking-wider mb-2">
+                  Code d'accès (6 caractères)
+                </label>
+                <input
+                  type="text"
+                  value={newGameCode}
+                  onChange={(e) => setNewGameCode(e.target.value.toUpperCase().slice(0, 6))}
+                  placeholder="Ex: 2026NY"
+                  maxLength={6}
+                  className="input-ancient w-full text-2xl text-center tracking-[0.3em] uppercase"
+                  disabled={actionLoading === 'create'}
+                />
+                <p className="text-xs text-amber-600/70 mt-2 text-center">
+                  Minimum 4 caractères (lettres et chiffres)
+                </p>
+              </div>
+
+              {createError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 rounded-lg bg-red-900/50 border border-red-700/50 text-red-300 text-sm flex items-center gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  {createError}
+                </motion.div>
+              )}
+
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={handleCreateGame}
+                disabled={newGameCode.length < 4 || actionLoading === 'create'}
+                className="w-full py-4 rounded-xl font-display font-bold text-lg uppercase tracking-wider bg-gradient-to-r from-amber-600 to-amber-700 text-stone-900 shadow-lg shadow-amber-900/30 hover:from-amber-500 hover:to-amber-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {actionLoading === 'create' ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <>
+                    <Play className="w-5 h-5" />
+                    Créer la Partie
+                  </>
+                )}
+              </motion.button>
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-amber-900/30">
+              <p className="text-xs text-stone-500 text-center">
+                La partie restera active pendant <strong className="text-amber-400">48 heures</strong>.<br />
+                Vous pourrez la terminer manuellement à tout moment.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="mt-6 mx-auto flex items-center gap-2 text-stone-500 hover:text-red-400 transition-colors text-sm"
+          >
+            <LogOut className="w-4 h-4" />
+            Déconnexion
+          </button>
         </motion.div>
       </div>
     );
@@ -371,6 +523,28 @@ export function AdminPanel() {
               {gameState.isStarted ? '🟢 En cours' : '🟡 En attente'}
             </div>
           </div>
+
+          {/* Code d'accès */}
+          {gameState.accessCode && (
+            <div className="mb-4 p-3 bg-amber-900/30 border border-amber-700/50 rounded-lg flex items-center justify-between">
+              <div>
+                <span className="text-xs text-amber-500 uppercase tracking-wider">Code d'accès</span>
+                <p className="font-mono text-2xl font-bold text-amber-200 tracking-[0.2em]">{gameState.accessCode}</p>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-stone-500">Expire dans</span>
+                <p className="text-sm text-amber-400">
+                  {gameState.expiresAt 
+                    ? (() => {
+                        const hours = Math.max(0, Math.floor((new Date(gameState.expiresAt).getTime() - Date.now()) / 3600000));
+                        return `${hours}h`;
+                      })()
+                    : '--'
+                  }
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
             <div className="bg-stone-800/50 rounded-lg p-3 text-center">
@@ -496,14 +670,38 @@ export function AdminPanel() {
             </motion.button>
           </div>
 
-          {/* Info box about single game */}
-          <div className="mt-4 p-3 bg-amber-900/20 border border-amber-700/30 rounded-lg">
-            <p className="text-xs text-amber-400 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>
-                <strong>Une seule partie active à la fois.</strong> Utilisez "Reset Partie" pour tout recommencer et permettre à de nouveaux joueurs de rejoindre.
-              </span>
-            </p>
+          {/* Terminer la partie */}
+          <div className="mt-4 p-4 bg-red-900/20 border border-red-700/30 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-red-300 font-medium flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4" />
+                  Terminer définitivement la partie
+                </p>
+                <p className="text-xs text-red-400/70 mt-1">
+                  Tous les joueurs seront déconnectés et la partie sera supprimée.
+                </p>
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={handleEndGame}
+                disabled={actionLoading === 'end'}
+                className={`px-4 py-2 rounded-lg font-display text-sm transition-all ${
+                  confirmEndGame
+                    ? 'bg-red-600 text-white animate-pulse'
+                    : 'bg-red-900/50 border border-red-700 text-red-300 hover:bg-red-800'
+                }`}
+              >
+                {actionLoading === 'end' ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : confirmEndGame ? (
+                  'Confirmer ?'
+                ) : (
+                  'Terminer'
+                )}
+              </motion.button>
+            </div>
           </div>
 
           {/* Contrôle des manches (mode contrôlé) */}

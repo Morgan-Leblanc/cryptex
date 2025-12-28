@@ -12,21 +12,25 @@ interface GameState {
   session: GameSession | null;
   isAdmin: boolean;
   
-  // Game waiting state
+  // Game state
+  gameId: string | null;
+  accessCode: string | null;
   isWaitingForStart: boolean;
   
   // Actions
   setView: (view: AppView) => void;
-  validateCode: (code: string) => boolean;
+  validateCode: (code: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
+  createGame: (code: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
   login: (username: string, avatar?: string) => Promise<{ error: string; message: string } | void>;
   logout: () => Promise<void>;
+  checkReconnect: () => Promise<boolean>;
   startGame: () => void;
   completeRound: (roundIndex: number, score: number) => void;
   resetGame: () => void;
   setWaitingForStart: (waiting: boolean) => void;
+  endGame: () => Promise<void>;
 }
 
-const ACCESS_CODE = '2026';
 const ADMIN_USERNAME = 'admin2026';
 const API_BASE = '/api/game';
 
@@ -38,16 +42,118 @@ export const useGameStore = create<GameState>()(
       user: null,
       session: null,
       isAdmin: false,
+      gameId: null,
+      accessCode: null,
       isWaitingForStart: false,
 
       setView: (view) => set({ view }),
 
-      validateCode: (code) => {
-        if (code === ACCESS_CODE) {
-          set({ isAuthenticated: true, view: 'login' });
-          return true;
+      // Valider le code d'accès (pour les joueurs)
+      validateCode: async (code) => {
+        try {
+          const response = await fetch(`${API_BASE}?action=validate-code`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }),
+          });
+          
+          const data = await response.json();
+          
+          if (!response.ok) {
+            return { 
+              error: data.error, 
+              message: data.message || 'Code invalide' 
+            };
+          }
+          
+          set({ 
+            isAuthenticated: true, 
+            view: 'login',
+            gameId: data.gameId,
+            accessCode: code.toUpperCase(),
+          });
+          return { success: true };
+        } catch (error) {
+          console.error('Failed to validate code:', error);
+          return { error: 'Network error', message: 'Erreur de connexion au serveur' };
         }
-        return false;
+      },
+
+      // Créer une nouvelle partie (admin)
+      createGame: async (code) => {
+        try {
+          const response = await fetch(`${API_BASE}?action=create-game`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }),
+          });
+          
+          const data = await response.json();
+          
+          if (!response.ok) {
+            return { 
+              error: data.error, 
+              message: data.message || 'Impossible de créer la partie' 
+            };
+          }
+          
+          set({ 
+            gameId: data.game.id,
+            accessCode: data.game.accessCode,
+          });
+          return { success: true };
+        } catch (error) {
+          console.error('Failed to create game:', error);
+          return { error: 'Network error', message: 'Erreur de connexion au serveur' };
+        }
+      },
+
+      // Vérifier si le joueur peut se reconnecter
+      checkReconnect: async () => {
+        const { user, isAdmin } = get();
+        
+        if (!user || isAdmin) return false;
+        
+        try {
+          const response = await fetch(`${API_BASE}?action=reconnect`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: user.username }),
+          });
+          
+          if (!response.ok) {
+            // La partie n'existe plus ou le joueur n'est plus enregistré
+            set({
+              view: 'code',
+              isAuthenticated: false,
+              user: null,
+              session: null,
+              gameId: null,
+              accessCode: null,
+              isWaitingForStart: false,
+            });
+            return false;
+          }
+          
+          const data = await response.json();
+          
+          if (data.reconnect) {
+            // Mettre à jour avec les données du serveur
+            set({
+              isAuthenticated: true,
+              gameId: data.game.id,
+              accessCode: data.game.accessCode,
+              isWaitingForStart: !data.game.isStarted,
+              view: 'game',
+            });
+            return true;
+          }
+          
+          return false;
+        } catch (error) {
+          console.error('Failed to check reconnect:', error);
+          return false;
+        }
       },
 
       login: async (username, avatar) => {
@@ -64,48 +170,36 @@ export const useGameStore = create<GameState>()(
           avatar: avatar || undefined,
         };
 
-        // Call API to join game
-        if (!isAdmin) {
-          try {
-            const response = await fetch(`${API_BASE}?action=join`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ username, avatar }),
-            });
-            
-            if (!response.ok) {
-              const errorData = await response.json();
-              return { 
-                error: errorData.error || 'Join failed', 
-                message: errorData.message || 'Impossible de rejoindre la partie' 
-              };
-            }
-          } catch (error) {
-            console.error('Failed to join game:', error);
-            return { error: 'Network error', message: 'Erreur de connexion au serveur' };
-          }
-        }
-
-        // Check if game is started
-        let isWaiting = true;
-        try {
-          const response = await fetch(API_BASE);
-          if (response.ok) {
-            const data = await response.json();
-            isWaiting = !data.isStarted;
-          }
-        } catch (error) {
-          console.error('Failed to check game state:', error);
-        }
-
+        // Pour l'admin, pas besoin de rejoindre via API
         if (isAdmin) {
           set({ 
             user, 
             isAdmin: true, 
+            isAuthenticated: true,
             isWaitingForStart: false,
             view: 'game',
           });
-        } else {
+          return;
+        }
+
+        // Call API to join game
+        try {
+          const response = await fetch(`${API_BASE}?action=join`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, avatar }),
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            return { 
+              error: errorData.error || 'Join failed', 
+              message: errorData.message || 'Impossible de rejoindre la partie' 
+            };
+          }
+
+          const joinData = await response.json();
+
           const session: GameSession = {
             userId,
             username,
@@ -120,26 +214,26 @@ export const useGameStore = create<GameState>()(
             user, 
             session, 
             isAdmin: false,
-            isWaitingForStart: isWaiting,
+            gameId: joinData.game?.id || get().gameId,
+            isWaitingForStart: !joinData.game?.isStarted,
             view: 'game',
           });
+        } catch (error) {
+          console.error('Failed to join game:', error);
+          return { error: 'Network error', message: 'Erreur de connexion au serveur' };
         }
       },
 
       logout: async () => {
         const { user, isAdmin } = get();
         
-        // Call API to leave game
+        // Pour les joueurs normaux, on ne supprime PAS du serveur (pour permettre la reconnexion)
+        // On reset juste l'état local
+        // Seul l'admin qui fait "end-game" termine vraiment la partie
+        
         if (user && !isAdmin) {
-          try {
-            await fetch(`${API_BASE}?action=leave`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ username: user.username }),
-            });
-          } catch (error) {
-            console.error('Failed to leave game:', error);
-          }
+          // On garde le joueur sur le serveur pour la reconnexion
+          // Mais on reset l'état local
         }
 
         set({
@@ -148,6 +242,30 @@ export const useGameStore = create<GameState>()(
           user: null,
           session: null,
           isAdmin: false,
+          gameId: null,
+          accessCode: null,
+          isWaitingForStart: false,
+        });
+      },
+
+      // Terminer la partie (admin uniquement)
+      endGame: async () => {
+        try {
+          await fetch(`${API_BASE}?action=end-game`, {
+            method: 'POST',
+          });
+        } catch (error) {
+          console.error('Failed to end game:', error);
+        }
+        
+        set({
+          view: 'code',
+          isAuthenticated: false,
+          user: null,
+          session: null,
+          isAdmin: false,
+          gameId: null,
+          accessCode: null,
           isWaitingForStart: false,
         });
       },
@@ -222,6 +340,8 @@ export const useGameStore = create<GameState>()(
         user: state.user,
         session: state.session,
         isAdmin: state.isAdmin,
+        gameId: state.gameId,
+        accessCode: state.accessCode,
       }),
     }
   )

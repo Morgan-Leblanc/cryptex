@@ -11,7 +11,7 @@ import { useGameSync } from './hooks/useGameSync';
 import { Loader2 } from 'lucide-react';
 
 function App() {
-  const { view, isAuthenticated, session, isAdmin, isWaitingForStart, setView } = useGameStore();
+  const { view, isAuthenticated, session, isAdmin, isWaitingForStart, setView, checkReconnect, user } = useGameStore();
   const [isLoading, setIsLoading] = useState(true);
   
   // Use the sync hook to keep game state in sync with server
@@ -21,6 +21,16 @@ function App() {
   useEffect(() => {
     const initializeView = async () => {
       setIsLoading(true);
+      
+      // Si l'utilisateur était connecté (données persistantes), essayer de reconnecter
+      if (user && !isAdmin) {
+        const reconnected = await checkReconnect();
+        if (reconnected) {
+          setIsLoading(false);
+          return;
+        }
+        // Si la reconnexion échoue, le store a déjà reset l'état
+      }
       
       if (!isAuthenticated) {
         setView('code');

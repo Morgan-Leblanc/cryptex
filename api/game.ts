@@ -41,6 +41,11 @@ interface GameState {
   roundWinners: string[];
   revealedHints: number[];
   resetAt: string | null; // Timestamp du dernier reset pour forcer la déconnexion des joueurs
+  // Nouveau: code d'accès et gestion de la partie
+  accessCode: string | null; // Code défini par l'admin pour rejoindre
+  isActive: boolean; // La partie existe-t-elle ?
+  expiresAt: string | null; // Expiration automatique après 48h
+  adminCreatedAt: string | null; // Quand l'admin a créé la partie
 }
 
 // ============================================
@@ -94,6 +99,11 @@ let gameState: GameState = {
   roundWinners: [],
   revealedHints: [0, 0, 0, 0, 0, 0],
   resetAt: null,
+  // Pas de partie active par défaut
+  accessCode: null,
+  isActive: false,
+  expiresAt: null,
+  adminCreatedAt: null,
 };
 
 let players: Record<string, Player> = {};
@@ -221,6 +231,11 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       connectedPlayers: Object.keys(players),
       playerCount: Object.keys(players).length,
       resetAt: gameState.resetAt,
+      // Nouvelles infos de partie
+      isActive: gameState.isActive,
+      accessCode: gameState.accessCode,
+      expiresAt: gameState.expiresAt,
+      adminCreatedAt: gameState.adminCreatedAt,
     };
 
     if (admin === 'true') {
@@ -382,7 +397,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({ success: true, game: gameState });
       }
 
-      // Reset
+      // Reset complet - termine la partie
       case 'reset': {
         const resetTimestamp = new Date().toISOString();
         gameState = {
@@ -391,15 +406,149 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
           isStarted: false,
           startedAt: null,
           createdAt: resetTimestamp,
-          gameMode: gameState.gameMode,
+          gameMode: 'free',
           currentRound: 0,
           roundActive: false,
           roundWinners: [],
           revealedHints: [0, 0, 0, 0, 0, 0],
           resetAt: resetTimestamp,
+          accessCode: null,
+          isActive: false,
+          expiresAt: null,
+          adminCreatedAt: null,
         };
         players = {};
         return res.status(200).json({ success: true, game: gameState, resetAt: resetTimestamp });
+      }
+
+      // Créer une nouvelle partie (admin)
+      case 'create-game': {
+        const { code } = body;
+        if (!code || code.length < 4) {
+          return res.status(400).json({ error: 'Code must be at least 4 characters' });
+        }
+        
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + 48 * 60 * 60 * 1000); // 48h
+        
+        gameState = {
+          id: `game_${Date.now()}`,
+          rounds: JSON.parse(JSON.stringify(DEFAULT_ROUNDS)),
+          isStarted: false,
+          startedAt: null,
+          createdAt: now.toISOString(),
+          gameMode: 'free',
+          currentRound: 0,
+          roundActive: false,
+          roundWinners: [],
+          revealedHints: [0, 0, 0, 0, 0, 0],
+          resetAt: null,
+          accessCode: code.toUpperCase(),
+          isActive: true,
+          expiresAt: expiresAt.toISOString(),
+          adminCreatedAt: now.toISOString(),
+        };
+        players = {};
+        
+        return res.status(200).json({ 
+          success: true, 
+          game: {
+            id: gameState.id,
+            accessCode: gameState.accessCode,
+            isActive: gameState.isActive,
+            expiresAt: gameState.expiresAt,
+          }
+        });
+      }
+
+      // Valider le code d'accès
+      case 'validate-code': {
+        const { code } = body;
+        if (!code) {
+          return res.status(400).json({ error: 'Code required' });
+        }
+        
+        // Vérifier si la partie existe et n'est pas expirée
+        if (!gameState.isActive || !gameState.accessCode) {
+          return res.status(404).json({ 
+            error: 'No active game',
+            message: 'Aucune partie active. L\'admin doit d\'abord créer une partie.'
+          });
+        }
+        
+        // Vérifier expiration
+        if (gameState.expiresAt && new Date() > new Date(gameState.expiresAt)) {
+          return res.status(410).json({ 
+            error: 'Game expired',
+            message: 'Cette partie a expiré (48h).'
+          });
+        }
+        
+        // Vérifier le code
+        if (code.toUpperCase() !== gameState.accessCode) {
+          return res.status(401).json({ 
+            error: 'Invalid code',
+            message: 'Code invalide'
+          });
+        }
+        
+        return res.status(200).json({ 
+          success: true,
+          gameId: gameState.id,
+        });
+      }
+
+      // Vérifier si un joueur existe (pour reconnexion)
+      case 'reconnect': {
+        const { username } = body;
+        if (!username) {
+          return res.status(400).json({ error: 'Username required' });
+        }
+        
+        // Vérifier si la partie est active
+        if (!gameState.isActive) {
+          return res.status(404).json({ 
+            error: 'No active game',
+            reconnect: false 
+          });
+        }
+        
+        // Vérifier si le joueur existe
+        const player = players[username];
+        if (!player) {
+          return res.status(404).json({ 
+            error: 'Player not found',
+            reconnect: false 
+          });
+        }
+        
+        return res.status(200).json({ 
+          success: true,
+          reconnect: true,
+          player: {
+            username: player.username,
+            avatar: player.avatar,
+            currentRound: player.currentRound,
+            isFinished: player.isFinished,
+          },
+          game: {
+            id: gameState.id,
+            isStarted: gameState.isStarted,
+            gameMode: gameState.gameMode,
+            accessCode: gameState.accessCode,
+          }
+        });
+      }
+
+      // Terminer la partie (admin uniquement)
+      case 'end-game': {
+        gameState.isActive = false;
+        gameState.resetAt = new Date().toISOString();
+        return res.status(200).json({ 
+          success: true, 
+          message: 'Partie terminée',
+          resetAt: gameState.resetAt,
+        });
       }
 
       // Rejoindre
@@ -407,6 +556,22 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         const { username, avatar } = body;
         if (!username) {
           return res.status(400).json({ error: 'Username required' });
+        }
+        
+        // Vérifier que la partie est active
+        if (!gameState.isActive) {
+          return res.status(404).json({ 
+            error: 'No active game',
+            message: 'Aucune partie active. L\'admin doit d\'abord créer une partie.'
+          });
+        }
+        
+        // Vérifier expiration
+        if (gameState.expiresAt && new Date() > new Date(gameState.expiresAt)) {
+          return res.status(410).json({ 
+            error: 'Game expired',
+            message: 'Cette partie a expiré.'
+          });
         }
         
         // Si la partie est lancée et le joueur n'existe pas, refuser
@@ -428,11 +593,13 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
           success: true, 
           player: players[username],
           game: {
+            id: gameState.id,
             isStarted: gameState.isStarted,
             gameMode: gameState.gameMode,
             currentRound: gameState.currentRound,
             roundActive: gameState.roundActive,
             connectedPlayers: Object.keys(players),
+            accessCode: gameState.accessCode,
           }
         });
       }
