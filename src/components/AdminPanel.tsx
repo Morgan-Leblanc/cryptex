@@ -108,13 +108,18 @@ export function AdminPanel() {
   }, [storedAccessCode]);
 
   // Fetch initial seulement + quand la fenêtre redevient visible
+  // Utiliser useRef pour éviter les re-renders dus aux dépendances
+  const fetchGameStateRef = useRef(fetchGameState);
+  fetchGameStateRef.current = fetchGameState;
+
   useEffect(() => {
-    fetchGameState(); // Fetch initial
+    // Fetch initial
+    fetchGameStateRef.current();
     
     // Fetch quand la fenêtre redevient visible (admin revient sur l'onglet)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        fetchGameState();
+        fetchGameStateRef.current();
       }
     };
 
@@ -123,7 +128,7 @@ export function AdminPanel() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchGameState]);
+  }, []); // Dépendances vides - fetchGameStateRef est stable
 
   const handleEditRound = (round: RoundConfig) => {
     setEditingRound(round.id);
@@ -374,18 +379,20 @@ export function AdminPanel() {
     );
   }
 
-  // Si on a un accessCode, FORCER isActive à true même si MongoDB dit le contraire
-  if (storedAccessCode && gameState && !gameState.isActive) {
-    setGameState({ ...gameState, isActive: true, accessCode: storedAccessCode });
-  }
-
-  // PROTECTION ABSOLUE : Si on a un accessCode, on NE ROLLBACK JAMAIS
-  // Même si toutes les conditions sont réunies, si storedAccessCode existe, on continue
-  if (storedAccessCode) {
-    // On a un code → partie existe → continuer avec le panneau admin
-    // (gameState devrait être défini à ce stade grâce aux protections précédentes)
-    if (!gameState) {
-      // Double sécurité : créer un état minimal si gameState est encore null
+  // PROTECTION : S'assurer que gameState a toujours isActive=true si on a un accessCode
+  // MAIS dans un useEffect pour éviter les re-renders infinis
+  useEffect(() => {
+    if (storedAccessCode && gameState) {
+      // Si on a un accessCode mais gameState.isActive est false, corriger
+      if (!gameState.isActive || gameState.accessCode !== storedAccessCode) {
+        setGameState({ 
+          ...gameState, 
+          isActive: true, 
+          accessCode: storedAccessCode 
+        });
+      }
+    } else if (storedAccessCode && !gameState) {
+      // Créer un état minimal si gameState est null mais on a un accessCode
       const minimalState: GameState = {
         id: 'temp',
         rounds: [],
@@ -400,13 +407,8 @@ export function AdminPanel() {
         accessCode: storedAccessCode,
       };
       setGameState(minimalState);
-      // Ne pas return, continuer pour afficher le panneau admin
-    } else if (!gameState.isActive) {
-      // Forcer isActive à true
-      setGameState({ ...gameState, isActive: true, accessCode: storedAccessCode });
     }
-    // Continuer pour afficher le panneau admin (pas de return)
-  }
+  }, [storedAccessCode, gameState?.isActive, gameState?.accessCode]);
 
   // Écran de création UNIQUEMENT si :
   // - Pas de code stocké (storedAccessCode est null/undefined)

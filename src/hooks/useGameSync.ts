@@ -8,6 +8,7 @@ export function useGameSync() {
     isAuthenticated, 
     user, 
     isAdmin, 
+    isWaitingForStart,
     setWaitingForStart,
   } = useGameStore();
   
@@ -15,7 +16,9 @@ export function useGameSync() {
   const lastIsStartedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated || !user || isAdmin) return;
+    // Ne s'activer QUE dans la waiting room (isWaitingForStart)
+    // Pendant le jeu, on ne veut PAS de sync automatique pour éviter les refresh
+    if (!isAuthenticated || !user || isAdmin || !isWaitingForStart) return;
 
     // Fonction simple pour récupérer l'état
     const fetchState = async () => {
@@ -59,7 +62,7 @@ export function useGameSync() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isAuthenticated, user, isAdmin, setWaitingForStart]);
+  }, [isAuthenticated, user, isAdmin, isWaitingForStart, setWaitingForStart]);
 
   // Exposer une fonction pour refresh manuel si nécessaire
   return {

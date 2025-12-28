@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useGameStore } from '../stores/gameStore';
 
 const API_BASE = '/api/game';
@@ -62,13 +62,18 @@ export function WaitingRoom() {
     }
   }, [setWaitingForStart]);
 
+  // Utiliser useRef pour éviter les re-renders dus aux dépendances
+  const fetchGameStateRef = useRef(fetchGameState);
+  fetchGameStateRef.current = fetchGameState;
+
   useEffect(() => {
-    fetchGameState(); // Fetch initial
+    // Fetch initial
+    fetchGameStateRef.current();
     
     // Fetch quand la fenêtre redevient visible
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        fetchGameState();
+        fetchGameStateRef.current();
       }
     };
 
@@ -77,7 +82,7 @@ export function WaitingRoom() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchGameState]);
+  }, []); // Dépendances vides - fetchGameStateRef est stable
 
   const handleLogout = async () => {
     setIsLoggingOut(true);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Trophy,
@@ -115,13 +115,18 @@ export function CryptexGame() {
   }, [user?.username]);
 
   // Fetch initial seulement + quand la fenêtre redevient visible
+  // Utiliser useRef pour éviter les re-renders dus aux dépendances
+  const fetchGameStateRef = useRef(fetchGameState);
+  fetchGameStateRef.current = fetchGameState;
+
   useEffect(() => {
-    fetchGameState(); // Fetch initial
+    // Fetch initial
+    fetchGameStateRef.current();
     
     // Fetch quand la fenêtre redevient visible (utilisateur revient sur l'onglet)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        fetchGameState();
+        fetchGameStateRef.current();
       }
     };
 
@@ -130,7 +135,7 @@ export function CryptexGame() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchGameState]);
+  }, []); // Dépendances vides - fetchGameStateRef est stable
 
   // Track current round ID to only reset when it actually changes
   const [lastRoundId, setLastRoundId] = useState<number | null>(null);

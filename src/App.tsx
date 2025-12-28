@@ -16,6 +16,7 @@ function App() {
   const [isReconnecting, setIsReconnecting] = useState(false);
   
   // Use the sync hook to keep game state in sync with server
+  // Le hook se désactive automatiquement si on n'est pas en waiting room
   useGameSync();
 
   // Attendre que zustand soit hydraté depuis localStorage
