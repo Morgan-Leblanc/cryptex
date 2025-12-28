@@ -20,6 +20,7 @@ interface GameState {
   // Actions
   setView: (view: AppView) => void;
   validateCode: (code: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
+  joinGameWithCode: (gameCode: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
   createGame: (code: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
   login: (username: string, avatar?: string) => Promise<{ error: string; message: string } | void>;
   logout: () => Promise<void>;
@@ -48,13 +49,26 @@ export const useGameStore = create<GameState>()(
 
       setView: (view) => set({ view }),
 
-      // Valider le code d'accès (pour les joueurs)
+      // Valider le code d'accès à l'app (code fixe 2026)
       validateCode: async (code) => {
+        // Code fixe pour accéder à l'application
+        if (code === '2026') {
+          set({ 
+            isAuthenticated: true, 
+            view: 'login',
+          });
+          return { success: true };
+        }
+        return { error: 'Invalid code', message: 'Code invalide' };
+      },
+
+      // Rejoindre une partie avec le code de partie
+      joinGameWithCode: async (gameCode: string) => {
         try {
           const response = await fetch(`${API_BASE}?action=validate-code`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code }),
+            body: JSON.stringify({ code: gameCode }),
           });
           
           const data = await response.json();
@@ -62,19 +76,17 @@ export const useGameStore = create<GameState>()(
           if (!response.ok) {
             return { 
               error: data.error, 
-              message: data.message || 'Code invalide' 
+              message: data.message || 'Code de partie invalide' 
             };
           }
           
           set({ 
-            isAuthenticated: true, 
-            view: 'login',
             gameId: data.gameId,
-            accessCode: code.toUpperCase(),
+            accessCode: gameCode.toUpperCase(),
           });
           return { success: true };
         } catch (error) {
-          console.error('Failed to validate code:', error);
+          console.error('Failed to join game:', error);
           return { error: 'Network error', message: 'Erreur de connexion au serveur' };
         }
       },
