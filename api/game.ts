@@ -1,86 +1,43 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { Redis } from '@upstash/redis';
 
 // ============================================
-// STORAGE - Vercel KV avec fallback fichier /tmp
+// STORAGE - Upstash Redis (gratuit, persistant)
 // ============================================
-let kvClient: typeof import('@vercel/kv').kv | null = null;
-let useFileFallback = false;
-let kvInitialized = false;
+let redis: Redis | null = null;
 
-// Chemin du fichier de fallback (dans /tmp sur Vercel)
-const FALLBACK_FILE = join('/tmp', 'cryptex-game-state.json');
-
-// Cache en mémoire pour le fallback fichier
-let fileCache: Record<string, unknown> = {};
-let fileCacheLoaded = false;
-
-function loadFileCache(): void {
-  if (fileCacheLoaded) return;
-  
-  try {
-    if (existsSync(FALLBACK_FILE)) {
-      const data = readFileSync(FALLBACK_FILE, 'utf-8');
-      fileCache = JSON.parse(data);
-      console.log('📂 Loaded state from /tmp file');
+function getRedis(): Redis {
+  if (!redis) {
+    // Essayer les variables Vercel KV d'abord, puis Upstash
+    const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+    const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+    
+    if (!url || !token) {
+      throw new Error('Redis not configured. Set KV_REST_API_URL/KV_REST_API_TOKEN or UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN');
     }
-  } catch (error) {
-    console.warn('⚠️ Could not read fallback file:', error);
-    fileCache = {};
+    
+    redis = new Redis({ url, token });
+    console.log('✅ Redis initialized');
   }
-  fileCacheLoaded = true;
-}
-
-function saveFileCache(): void {
-  try {
-    writeFileSync(FALLBACK_FILE, JSON.stringify(fileCache), 'utf-8');
-  } catch (error) {
-    console.warn('⚠️ Could not write fallback file:', error);
-  }
-}
-
-async function initKV() {
-  if (kvInitialized) return;
-  kvInitialized = true;
-  
-  // Vérifier si les variables KV sont présentes
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
-    console.warn('⚠️ Vercel KV not configured - using /tmp file fallback');
-    useFileFallback = true;
-    loadFileCache();
-    return;
-  }
-  
-  try {
-    const kvModule = await import('@vercel/kv');
-    kvClient = kvModule.kv;
-    console.log('✅ Vercel KV initialized');
-  } catch (error) {
-    console.error('❌ Failed to initialize KV:', error);
-    useFileFallback = true;
-    loadFileCache();
-  }
+  return redis;
 }
 
 async function kvGet<T>(key: string): Promise<T | null> {
-  await initKV();
-  if (useFileFallback) {
-    loadFileCache();
-    return (fileCache[key] as T) || null;
+  try {
+    const data = await getRedis().get<T>(key);
+    return data;
+  } catch (error) {
+    console.error('Redis GET error:', error);
+    return null;
   }
-  return kvClient!.get<T>(key);
 }
 
 async function kvSet(key: string, value: unknown): Promise<void> {
-  await initKV();
-  if (useFileFallback) {
-    loadFileCache();
-    fileCache[key] = value;
-    saveFileCache();
-    return;
+  try {
+    await getRedis().set(key, value);
+  } catch (error) {
+    console.error('Redis SET error:', error);
   }
-  await kvClient!.set(key, value);
 }
 
 // ============================================
