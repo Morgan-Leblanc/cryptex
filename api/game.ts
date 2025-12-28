@@ -124,6 +124,9 @@ interface GameState {
   isActive: boolean;
   expiresAt: string | null;
   adminCreatedAt: string | null;
+  // Admin session
+  adminSessionId: string | null;
+  adminConnectedAt: string | null;
 }
 
 // ============================================
@@ -209,6 +212,8 @@ function createDefaultGameState(): GameState {
     isActive: false,
     expiresAt: null,
     adminCreatedAt: null,
+    adminSessionId: null,
+    adminConnectedAt: null,
   };
 }
 
@@ -528,8 +533,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // Créer une nouvelle partie (admin)
+        // Admin login - vérifie qu'il n'y a pas déjà un admin connecté
+        case 'admin-login': {
+          const { sessionId } = body;
+          if (!sessionId) {
+            return res.status(400).json({ error: 'Session ID required' });
+          }
+          
+          // Si un admin est déjà connecté avec une session différente
+          if (gameState.adminSessionId && gameState.adminSessionId !== sessionId) {
+            return res.status(403).json({ 
+              error: 'Admin already connected',
+              message: 'Un administrateur est déjà connecté sur un autre navigateur.'
+            });
+          }
+          
+          // Enregistrer la session admin
+          gameState.adminSessionId = sessionId;
+          gameState.adminConnectedAt = new Date().toISOString();
+          await setGameState(gameState);
+          
+          return res.status(200).json({ 
+            success: true,
+            message: 'Admin connecté',
+          });
+        }
+
+        // Admin logout - déconnecte tout le monde
+        case 'admin-logout': {
+          const resetTimestamp = new Date().toISOString();
+          
+          // Reset complet de la partie
+          gameState.isActive = false;
+          gameState.isStarted = false;
+          gameState.adminSessionId = null;
+          gameState.adminConnectedAt = null;
+          gameState.resetAt = resetTimestamp;
+          
+          // Vider les joueurs
+          players = {};
+          
+          await setGameState(gameState);
+          await setPlayers(players);
+          
+          return res.status(200).json({ 
+            success: true,
+            message: 'Admin déconnecté, tous les joueurs ont été déconnectés',
+            resetAt: resetTimestamp,
+          });
+        }
+
         case 'create-game': {
-          const { code } = body;
+          const { code, adminSessionId } = body;
           if (!code || code.length < 4) {
             return res.status(400).json({ error: 'Code must be at least 4 characters' });
           }
@@ -553,6 +608,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             isActive: true,
             expiresAt: expiresAt.toISOString(),
             adminCreatedAt: now.toISOString(),
+            adminSessionId: adminSessionId || null,
+            adminConnectedAt: now.toISOString(),
           };
           players = {};
           

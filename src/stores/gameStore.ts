@@ -17,6 +17,9 @@ interface GameState {
   accessCode: string | null;
   isWaitingForStart: boolean;
   
+  // Admin session (unique per browser)
+  adminSessionId: string | null;
+  
   // Actions
   setView: (view: AppView) => void;
   validateCode: (code: string) => Promise<{ error?: string; message?: string; success?: boolean }>;
@@ -45,6 +48,7 @@ export const useGameStore = create<GameState>()(
       gameId: null,
       accessCode: null,
       isWaitingForStart: false,
+      adminSessionId: null,
 
       setView: (view) => set({ view }),
 
@@ -95,11 +99,13 @@ export const useGameStore = create<GameState>()(
 
       // Créer une nouvelle partie (admin)
       createGame: async (code) => {
+        const { adminSessionId } = get();
+        
         try {
           const response = await fetch(`${API_BASE}?action=create-game`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code }),
+            body: JSON.stringify({ code, adminSessionId }),
           });
           
           const data = await response.json();
@@ -197,13 +203,40 @@ export const useGameStore = create<GameState>()(
           avatar: avatar || undefined,
         };
 
-        // Pour l'admin, pas besoin de rejoindre via API
+        // Pour l'admin
         if (isAdmin) {
+          // Générer un sessionId unique pour cet admin (ou réutiliser l'existant)
+          let sessionId = get().adminSessionId;
+          if (!sessionId) {
+            sessionId = `admin_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+          }
+          
+          // Vérifier qu'il n'y a pas déjà un admin connecté sur un autre navigateur
+          try {
+            const response = await fetch(`${API_BASE}?action=admin-login`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId }),
+            });
+            
+            if (!response.ok) {
+              const errorData = await response.json();
+              return { 
+                error: errorData.error || 'Admin login failed', 
+                message: errorData.message || 'Un administrateur est déjà connecté.' 
+              };
+            }
+          } catch (error) {
+            console.error('Failed to login admin:', error);
+            // En cas d'erreur réseau, on laisse passer (pour dev local)
+          }
+          
           set({ 
             user, 
             isAdmin: true, 
             isAuthenticated: true,
             isWaitingForStart: false,
+            adminSessionId: sessionId,
             view: 'game',
           });
           return;
@@ -252,17 +285,22 @@ export const useGameStore = create<GameState>()(
       },
 
       logout: async () => {
-        const { user, isAdmin } = get();
+        const { isAdmin } = get();
         
-        // Pour les joueurs normaux, on ne supprime PAS du serveur (pour permettre la reconnexion)
-        // On reset juste l'état local
-        // Seul l'admin qui fait "end-game" termine vraiment la partie
-        
-        if (user && !isAdmin) {
-          // On garde le joueur sur le serveur pour la reconnexion
-          // Mais on reset l'état local
+        // Si c'est l'admin qui se déconnecte → déconnecter tout le monde
+        if (isAdmin) {
+          try {
+            await fetch(`${API_BASE}?action=admin-logout`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+          } catch (error) {
+            console.error('Failed to logout admin:', error);
+          }
         }
-
+        
+        // Pour les joueurs normaux, on ne supprime PAS du serveur
+        // Reset de l'état local
         set({
           view: 'code',
           isAuthenticated: false,
@@ -272,10 +310,11 @@ export const useGameStore = create<GameState>()(
           gameId: null,
           accessCode: null,
           isWaitingForStart: false,
+          adminSessionId: null,
         });
       },
 
-      // Terminer la partie (admin uniquement)
+      // Terminer la partie (admin uniquement) - mais l'admin reste connecté
       endGame: async () => {
         try {
           await fetch(`${API_BASE}?action=end-game`, {
@@ -285,15 +324,11 @@ export const useGameStore = create<GameState>()(
           console.error('Failed to end game:', error);
         }
         
+        // L'admin reste connecté, juste la partie est terminée
+        // On reset gameId et accessCode pour montrer l'écran de création
         set({
-          view: 'code',
-          isAuthenticated: false,
-          user: null,
-          session: null,
-          isAdmin: false,
           gameId: null,
           accessCode: null,
-          isWaitingForStart: false,
         });
       },
 
@@ -369,6 +404,7 @@ export const useGameStore = create<GameState>()(
         isAdmin: state.isAdmin,
         gameId: state.gameId,
         accessCode: state.accessCode,
+        adminSessionId: state.adminSessionId,
       }),
     }
   )
