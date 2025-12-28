@@ -277,6 +277,20 @@ export function CryptexGame() {
           // Mauvaise réponse
           setWheelResults(Array(WHEEL_COUNT).fill(false));
         }
+      } else {
+        // Erreur API - rafraîchir l'état du jeu pour resynchroniser
+        console.error('Check solution failed:', response.status);
+        try {
+          const errorData = await response.json();
+          console.error('Error details:', errorData);
+          // Si le round n'est pas actif ou pas le bon, rafraîchir
+          if (errorData.error === 'Round not active yet' || errorData.error === 'Not the current round') {
+            fetchGameState();
+          }
+        } catch {
+          // Ignorer les erreurs de parsing
+        }
+        setWheelResults(Array(WHEEL_COUNT).fill(false));
       }
     } catch (error) {
       console.error('Failed to check solution:', error);

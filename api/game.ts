@@ -1171,21 +1171,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const { roundId, solution } = body;
           
           if (!roundId || !solution) {
-            return res.status(400).json({ error: 'roundId and solution required' });
+            return res.status(400).json({ 
+              error: 'roundId and solution required',
+              received: { roundId, solution: solution ? '***' : undefined }
+            });
           }
 
+          // En mode contrôlé, vérifications supplémentaires
           if (gameState.gameMode === 'controlled') {
-            if (roundId !== gameState.currentRound) {
-              return res.status(400).json({ error: 'Not the current round' });
+            // Convertir en nombre pour comparaison
+            const roundIdNum = typeof roundId === 'string' ? parseInt(roundId, 10) : roundId;
+            
+            if (roundIdNum !== gameState.currentRound) {
+              return res.status(400).json({ 
+                error: 'Not the current round',
+                expected: gameState.currentRound,
+                received: roundIdNum,
+                gameMode: gameState.gameMode
+              });
             }
             if (!gameState.roundActive) {
-              return res.status(400).json({ error: 'Round not active yet' });
+              return res.status(400).json({ 
+                error: 'Round not active yet',
+                roundActive: gameState.roundActive,
+                currentRound: gameState.currentRound
+              });
             }
           }
           
-          const round = gameState.rounds.find(r => r.id === roundId);
+          // Trouver le round par ID (aussi convertir pour être sûr)
+          const roundIdNum = typeof roundId === 'string' ? parseInt(roundId, 10) : roundId;
+          const round = gameState.rounds.find(r => r.id === roundIdNum);
           if (!round) {
-            return res.status(404).json({ error: 'Round not found' });
+            return res.status(404).json({ 
+              error: 'Round not found',
+              roundId: roundIdNum,
+              availableRounds: gameState.rounds.map(r => r.id)
+            });
           }
 
           const isCorrect = solution?.toUpperCase() === round.solution;
