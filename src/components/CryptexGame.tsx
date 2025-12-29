@@ -21,6 +21,7 @@ interface RoundConfig {
   question?: string;
   hints?: string[];
   revealedHints?: number;
+  solution?: string;
 }
 
 interface GameInfo {
@@ -279,7 +280,8 @@ export function CryptexGame() {
         } catch {
           // Ignorer les erreurs de parsing
         }
-        setWheelResults(Array(WHEEL_COUNT).fill(false));
+        const currentWheelCount = round?.solution?.length || 6;
+        setWheelResults(Array(currentWheelCount).fill(false));
       }
     } catch (error) {
       console.error('Failed to check solution:', error);
