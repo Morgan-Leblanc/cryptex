@@ -154,11 +154,11 @@ export function AdminPanel() {
   };
 
   const handleSaveRound = async () => {
-    if (!editingRound || !editForm.solution) return;
+    if (!editingRound || !editForm.solution || editForm.solution.length === 0) return;
     
     setActionLoading('save');
     try {
-      const solution = editForm.solution.toUpperCase().slice(0, 6).padEnd(6, 'A');
+      const solution = editForm.solution.toUpperCase().replace(/[^A-Z]/g, '');
       const response = await fetch(API_BASE, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -617,7 +617,9 @@ export function AdminPanel() {
               <div className="text-xs text-stone-500">Joueurs</div>
             </div>
             <div className="bg-stone-800/50 rounded-lg p-3 text-center">
-              <div className="text-2xl font-bold text-amber-400">6</div>
+              <div className="text-2xl font-bold text-amber-400">
+                {gameState.rounds[0]?.solution?.length || 6}
+              </div>
               <div className="text-xs text-stone-500">Lettres</div>
             </div>
             <div className="bg-stone-800/50 rounded-lg p-3 text-center">
@@ -1061,7 +1063,7 @@ export function AdminPanel() {
                       </div>
                       <div>
                         <label className="text-xs text-stone-500 mb-1 block">
-                          Solution (6 lettres)
+                          Solution (longueur variable)
                         </label>
                         <input
                           type="text"
@@ -1069,12 +1071,15 @@ export function AdminPanel() {
                           onChange={(e) =>
                             setEditForm({
                               ...editForm,
-                              solution: e.target.value.toUpperCase().slice(0, 6),
+                              solution: e.target.value.toUpperCase().replace(/[^A-Z]/g, ''),
                             })
                           }
-                          maxLength={6}
+                          placeholder="Ex: AURORE, ENIGME..."
                           className="w-full px-3 py-2 bg-stone-900 border border-stone-600 rounded-lg text-amber-100 text-sm font-mono tracking-wider focus:border-amber-500 outline-none"
                         />
+                        <p className="text-xs text-stone-600 mt-1">
+                          {editForm.solution?.length || 0} lettre{(editForm.solution?.length || 0) > 1 ? 's' : ''}
+                        </p>
                       </div>
                     </div>
                     <div>

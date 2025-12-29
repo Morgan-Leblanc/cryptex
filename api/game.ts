@@ -1304,7 +1304,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (updates.solution) {
-        updates.solution = updates.solution.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6).padEnd(6, 'A');
+        updates.solution = updates.solution.toUpperCase().replace(/[^A-Z]/g, '');
+        // S'assurer qu'il y a au moins une lettre
+        if (updates.solution.length === 0) {
+          return res.status(400).json({ error: 'Solution must contain at least one letter' });
+        }
       }
 
       gameState.rounds[roundIndex] = {

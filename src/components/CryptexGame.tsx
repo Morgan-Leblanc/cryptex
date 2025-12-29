@@ -12,7 +12,6 @@ import {
 import { CryptexWheel } from './CryptexWheel';
 import { useGameStore } from '../stores/gameStore';
 
-const WHEEL_COUNT = 6;
 const API_BASE = '/api/game';
 
 interface RoundConfig {
@@ -44,11 +43,14 @@ export function CryptexGame() {
     : (session?.currentRound ?? 0);
   const round = rounds[currentRoundIndex];
 
-  const [wheels, setWheels] = useState<string[]>(Array(WHEEL_COUNT).fill('A'));
+  // Déterminer le nombre de roues basé sur la solution actuelle
+  const wheelCount = round?.solution?.length || 6;
+  
+  const [wheels, setWheels] = useState<string[]>(() => Array(6).fill('A'));
   const [isChecking, setIsChecking] = useState(false);
   const [startTime, setStartTime] = useState(Date.now());
   const [elapsed, setElapsed] = useState(0);
-  const [wheelResults, setWheelResults] = useState<(boolean | null)[]>(Array(WHEEL_COUNT).fill(null));
+  const [wheelResults, setWheelResults] = useState<(boolean | null)[]>(() => Array(6).fill(null));
   const [showSuccess, setShowSuccess] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
 
@@ -117,6 +119,16 @@ export function CryptexGame() {
   // Track current round ID to only reset when it actually changes
   const [lastRoundId, setLastRoundId] = useState<number | null>(null);
   const [lastGameMode, setLastGameMode] = useState<'free' | 'controlled' | null>(null);
+  const [lastWheelCount, setLastWheelCount] = useState<number>(6);
+
+  // Initialiser les roues quand le round est disponible
+  useEffect(() => {
+    if (round && wheels.length !== wheelCount) {
+      setWheels(Array(wheelCount).fill('A'));
+      setWheelResults(Array(wheelCount).fill(null));
+      setLastWheelCount(wheelCount);
+    }
+  }, [round, wheelCount, wheels.length]);
 
   // Reset when round actually changes (not just when reference updates from polling)
   useEffect(() => {
@@ -124,24 +136,26 @@ export function CryptexGame() {
       ? gameInfo.currentRound 
       : (round?.id ?? null);
     
-    // Only reset if the round ID OR game mode actually changed
+    // Only reset if the round ID OR game mode OR wheel count actually changed
     const roundChanged = roundId !== null && roundId !== lastRoundId;
     const modeChanged = gameInfo.gameMode !== lastGameMode;
+    const wheelCountChanged = wheelCount !== lastWheelCount;
     
-    if (roundChanged || modeChanged) {
+    if (roundChanged || modeChanged || wheelCountChanged) {
       setLastRoundId(roundId);
       setLastGameMode(gameInfo.gameMode);
+      setLastWheelCount(wheelCount);
       
-      // Seulement reset si on change vraiment de round (pas juste un refresh)
-      if (roundChanged) {
-        setWheels(Array(WHEEL_COUNT).fill('A'));
-        setWheelResults(Array(WHEEL_COUNT).fill(null));
+      // Seulement reset si on change vraiment de round ou de taille (pas juste un refresh)
+      if (roundChanged || wheelCountChanged) {
+        setWheels(Array(wheelCount).fill('A'));
+        setWheelResults(Array(wheelCount).fill(null));
         setShowSuccess(false);
         setHasFoundCurrentRound(false);
         setStartTime(Date.now());
       }
     }
-  }, [gameInfo.currentRound, gameInfo.gameMode, round?.id, lastRoundId, lastGameMode]);
+  }, [gameInfo.currentRound, gameInfo.gameMode, round?.id, wheelCount, lastRoundId, lastGameMode, lastWheelCount]);
 
   // Timer
   useEffect(() => {
@@ -249,7 +263,8 @@ export function CryptexGame() {
           }
         } else {
           // Mauvaise réponse
-          setWheelResults(Array(WHEEL_COUNT).fill(false));
+          const currentWheelCount = round?.solution?.length || 6;
+          setWheelResults(Array(currentWheelCount).fill(false));
         }
       } else {
         // Erreur API - rafraîchir l'état du jeu pour resynchroniser
@@ -276,8 +291,9 @@ export function CryptexGame() {
   };
 
   const resetWheels = () => {
-    setWheels(Array(WHEEL_COUNT).fill('A'));
-    setWheelResults(Array(WHEEL_COUNT).fill(null));
+    const currentWheelCount = round?.solution?.length || 6;
+    setWheels(Array(currentWheelCount).fill('A'));
+    setWheelResults(Array(currentWheelCount).fill(null));
   };
 
   const handleLogout = async () => {
