@@ -556,6 +556,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // Public: sans solutions, avec indices révélés
+      // Mais on inclut la longueur de la solution pour déterminer le nombre de roues
       response.rounds = gameState.rounds.map((r, index) => {
         const hintsCount = gameState.revealedHints[index] || 0;
         return {
@@ -566,6 +567,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           hints: r.hints ? r.hints.slice(0, hintsCount) : [],
           totalHints: r.hints ? r.hints.length : 0,
           revealedHints: hintsCount,
+          solutionLength: r.solution?.length || 6, // Longueur de la solution pour déterminer le nombre de roues
         };
       });
       response.revealedHints = gameState.revealedHints;

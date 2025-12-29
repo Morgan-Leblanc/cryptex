@@ -22,6 +22,7 @@ interface RoundConfig {
   hints?: string[];
   revealedHints?: number;
   solution?: string;
+  solutionLength?: number; // Longueur de la solution pour déterminer le nombre de roues
 }
 
 interface GameInfo {
@@ -45,7 +46,8 @@ export function CryptexGame() {
   const round = rounds[currentRoundIndex];
 
   // Déterminer le nombre de roues basé sur la solution actuelle
-  const wheelCount = round?.solution?.length || 6;
+  // Utiliser solutionLength si disponible (pour les joueurs), sinon solution.length (pour admin)
+  const wheelCount = round?.solutionLength || round?.solution?.length || 6;
   
   const [wheels, setWheels] = useState<string[]>(() => Array(6).fill('A'));
   const [isChecking, setIsChecking] = useState(false);
@@ -264,7 +266,7 @@ export function CryptexGame() {
           }
         } else {
           // Mauvaise réponse
-          const currentWheelCount = round?.solution?.length || 6;
+          const currentWheelCount = round?.solutionLength || round?.solution?.length || 6;
           setWheelResults(Array(currentWheelCount).fill(false));
         }
       } else {
@@ -280,7 +282,7 @@ export function CryptexGame() {
         } catch {
           // Ignorer les erreurs de parsing
         }
-        const currentWheelCount = round?.solution?.length || 6;
+        const currentWheelCount = round?.solutionLength || round?.solution?.length || 6;
         setWheelResults(Array(currentWheelCount).fill(false));
       }
     } catch (error) {
@@ -293,7 +295,7 @@ export function CryptexGame() {
   };
 
   const resetWheels = () => {
-    const currentWheelCount = round?.solution?.length || 6;
+    const currentWheelCount = round?.solutionLength || round?.solution?.length || 6;
     setWheels(Array(currentWheelCount).fill('A'));
     setWheelResults(Array(currentWheelCount).fill(null));
   };
