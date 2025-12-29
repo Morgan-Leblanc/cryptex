@@ -27,7 +27,6 @@ export function CryptexWheel({
   const accumulatorRef = useRef(0);
   const touchStartXRef = useRef(0);
   const touchStartYRef = useRef(0);
-  const isVerticalScrollRef = useRef(false);
   
   const [isDragging, setIsDragging] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(
@@ -97,11 +96,10 @@ export function CryptexWheel({
     velocityRef.current = 0;
     accumulatorRef.current = 0;
     
-    // Pour détecter le scroll vertical vs horizontal
+    // Pour détecter le scroll vertical vs horizontal (seulement pour référence)
     if (clientX !== undefined) {
       touchStartXRef.current = clientX;
       touchStartYRef.current = clientY;
-      isVerticalScrollRef.current = false;
     }
   }, [isLocked]);
 
@@ -109,23 +107,15 @@ export function CryptexWheel({
   const handleMove = useCallback((clientY: number, clientX?: number) => {
     if (!isDragging || isLocked) return;
 
-    // Détecter si c'est un scroll vertical ou horizontal
+    // Protection minimale contre les mouvements purement horizontaux
+    // Mais on traite directement le mouvement vertical pour plus de réactivité
     if (clientX !== undefined) {
       const deltaX = Math.abs(clientX - touchStartXRef.current);
       const deltaY = Math.abs(clientY - touchStartYRef.current);
       
-      // Si mouvement horizontal > vertical, ne pas traiter comme scroll vertical
-      if (deltaX > deltaY && deltaX > 10) {
-        return; // Laisser le scroll horizontal se faire normalement
-      }
-      
-      // Confirmer que c'est un scroll vertical après un certain seuil
-      if (deltaY > 5 && !isVerticalScrollRef.current) {
-        isVerticalScrollRef.current = true;
-      }
-      
-      // Si pas encore confirmé comme vertical, ne pas traiter
-      if (!isVerticalScrollRef.current) {
+      // Seulement ignorer si c'est clairement un mouvement horizontal (pas vertical du tout)
+      // Seuil très bas pour être réactif
+      if (deltaX > deltaY * 2 && deltaX > 15) {
         return;
       }
     }
@@ -136,14 +126,14 @@ export function CryptexWheel({
     
     // Calculer la vélocité - amélioré pour mobile
     if (deltaTime > 0) {
-      velocityRef.current = deltaY / deltaTime * 20; // Légèrement augmenté pour plus de réactivité
+      velocityRef.current = deltaY / deltaTime * 20;
     }
     
     // Accumuler le déplacement
     accumulatorRef.current += deltaY;
     
-    // Changement de lettre immédiat si on dépasse le seuil - ajusté pour mobile
-    const threshold = 16; // Seuil réduit pour plus de réactivité sur mobile
+    // Changement de lettre immédiat si on dépasse le seuil - seuil réduit pour plus de réactivité
+    const threshold = 14; // Seuil encore plus réduit pour une meilleure réactivité
     const lettersMoved = Math.floor(accumulatorRef.current / threshold);
     
     if (lettersMoved !== 0) {
@@ -154,7 +144,7 @@ export function CryptexWheel({
       }
     }
     
-    // Offset visuel fluide - amélioré
+    // Offset visuel fluide
     setVisualOffset(-accumulatorRef.current * 0.65);
     
     lastYRef.current = clientY;
@@ -165,7 +155,6 @@ export function CryptexWheel({
   const handleEnd = useCallback(() => {
     if (!isDragging) return;
     setIsDragging(false);
-    isVerticalScrollRef.current = false;
     
     // Si vélocité significative, lancer l'inertie - seuil réduit pour mobile
     if (Math.abs(velocityRef.current) > 1.5) {
