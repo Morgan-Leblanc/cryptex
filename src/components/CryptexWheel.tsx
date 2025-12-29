@@ -25,6 +25,9 @@ export function CryptexWheel({
   const lastTimeRef = useRef(0);
   const animationRef = useRef<number | undefined>(undefined);
   const accumulatorRef = useRef(0);
+  const touchStartXRef = useRef(0);
+  const touchStartYRef = useRef(0);
+  const isVerticalScrollRef = useRef(false);
   
   const [isDragging, setIsDragging] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(
@@ -47,10 +50,10 @@ export function CryptexWheel({
     onChange(LETTERS[newIndex]);
   }, [currentIndex, isLocked, onChange]);
 
-  // Animation d'inertie
+  // Animation d'inertie - optimisée pour mobile
   const animateInertia = useCallback(() => {
-    const friction = 0.92;
-    const minVelocity = 0.5;
+    const friction = 0.94; // Friction légèrement réduite pour plus de fluidité
+    const minVelocity = 0.3; // Seuil réduit pour continuer plus longtemps
     
     velocityRef.current *= friction;
     
@@ -68,8 +71,8 @@ export function CryptexWheel({
         }
       }
       
-      // Offset visuel pour le smooth scrolling
-      setVisualOffset(-accumulatorRef.current * 0.8);
+      // Offset visuel pour le smooth scrolling - plus fluide
+      setVisualOffset(-accumulatorRef.current * 0.7);
       
       animationRef.current = requestAnimationFrame(animateInertia);
     } else {
@@ -80,7 +83,7 @@ export function CryptexWheel({
   }, [changeLetter]);
 
   // Démarrer le drag
-  const handleStart = useCallback((clientY: number) => {
+  const handleStart = useCallback((clientY: number, clientX?: number) => {
     if (isLocked) return;
     
     // Arrêter l'animation en cours
@@ -93,26 +96,54 @@ export function CryptexWheel({
     lastTimeRef.current = performance.now();
     velocityRef.current = 0;
     accumulatorRef.current = 0;
+    
+    // Pour détecter le scroll vertical vs horizontal
+    if (clientX !== undefined) {
+      touchStartXRef.current = clientX;
+      touchStartYRef.current = clientY;
+      isVerticalScrollRef.current = false;
+    }
   }, [isLocked]);
 
-  // Pendant le drag
-  const handleMove = useCallback((clientY: number) => {
+  // Pendant le drag - optimisé pour mobile
+  const handleMove = useCallback((clientY: number, clientX?: number) => {
     if (!isDragging || isLocked) return;
+
+    // Détecter si c'est un scroll vertical ou horizontal
+    if (clientX !== undefined) {
+      const deltaX = Math.abs(clientX - touchStartXRef.current);
+      const deltaY = Math.abs(clientY - touchStartYRef.current);
+      
+      // Si mouvement horizontal > vertical, ne pas traiter comme scroll vertical
+      if (deltaX > deltaY && deltaX > 10) {
+        return; // Laisser le scroll horizontal se faire normalement
+      }
+      
+      // Confirmer que c'est un scroll vertical après un certain seuil
+      if (deltaY > 5 && !isVerticalScrollRef.current) {
+        isVerticalScrollRef.current = true;
+      }
+      
+      // Si pas encore confirmé comme vertical, ne pas traiter
+      if (!isVerticalScrollRef.current) {
+        return;
+      }
+    }
 
     const now = performance.now();
     const deltaY = lastYRef.current - clientY;
     const deltaTime = now - lastTimeRef.current;
     
-    // Calculer la vélocité
+    // Calculer la vélocité - amélioré pour mobile
     if (deltaTime > 0) {
-      velocityRef.current = deltaY / deltaTime * 16; // Normaliser à ~60fps
+      velocityRef.current = deltaY / deltaTime * 20; // Légèrement augmenté pour plus de réactivité
     }
     
     // Accumuler le déplacement
     accumulatorRef.current += deltaY;
     
-    // Changement de lettre immédiat si on dépasse le seuil
-    const threshold = 18; // Seuil réduit pour plus de réactivité
+    // Changement de lettre immédiat si on dépasse le seuil - ajusté pour mobile
+    const threshold = 16; // Seuil réduit pour plus de réactivité sur mobile
     const lettersMoved = Math.floor(accumulatorRef.current / threshold);
     
     if (lettersMoved !== 0) {
@@ -123,8 +154,8 @@ export function CryptexWheel({
       }
     }
     
-    // Offset visuel fluide
-    setVisualOffset(-accumulatorRef.current * 0.6);
+    // Offset visuel fluide - amélioré
+    setVisualOffset(-accumulatorRef.current * 0.65);
     
     lastYRef.current = clientY;
     lastTimeRef.current = now;
@@ -134,9 +165,10 @@ export function CryptexWheel({
   const handleEnd = useCallback(() => {
     if (!isDragging) return;
     setIsDragging(false);
+    isVerticalScrollRef.current = false;
     
-    // Si vélocité significative, lancer l'inertie
-    if (Math.abs(velocityRef.current) > 2) {
+    // Si vélocité significative, lancer l'inertie - seuil réduit pour mobile
+    if (Math.abs(velocityRef.current) > 1.5) {
       animationRef.current = requestAnimationFrame(animateInertia);
     } else {
       setVisualOffset(0);
@@ -151,15 +183,24 @@ export function CryptexWheel({
     changeLetter(e.deltaY > 0 ? 1 : -1);
   }, [isLocked, changeLetter]);
 
-  // Touch events
+  // Touch events - optimisés pour mobile
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    handleStart(e.touches[0].clientY);
+    const touch = e.touches[0];
+    // Empêcher le scroll de la page dès le début
+    e.preventDefault();
+    handleStart(touch.clientY, touch.clientX);
   }, [handleStart]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!isDragging) return;
+    
+    const touch = e.touches[0];
+    
+    // Toujours empêcher le scroll de la page quand on drag sur les roues
     e.preventDefault();
-    handleMove(e.touches[0].clientY);
-  }, [handleMove]);
+    
+    handleMove(touch.clientY, touch.clientX);
+  }, [handleMove, isDragging]);
 
   // Cleanup
   useEffect(() => {
@@ -230,13 +271,13 @@ export function CryptexWheel({
           ${isLocked ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'}
         `}
         style={{ 
-          touchAction: 'none',
+          touchAction: 'none', // Empêche complètement le scroll natif pour gérer le scroll manuellement
           border: '3px solid',
           transition: 'box-shadow 0.15s, border-color 0.15s',
           ...getGlowStyle(),
         }}
-        onMouseDown={(e) => handleStart(e.clientY)}
-        onMouseMove={(e) => handleMove(e.clientY)}
+        onMouseDown={(e) => handleStart(e.clientY, e.clientX)}
+        onMouseMove={(e) => isDragging && handleMove(e.clientY, e.clientX)}
         onMouseUp={handleEnd}
         onMouseLeave={handleEnd}
         onTouchStart={handleTouchStart}
